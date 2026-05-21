@@ -27,15 +27,15 @@ services:
       - key: DEMO_MODE
         value: "true"
       - key: BINANCE_API_KEY
-        sync: false  # set manually
+        value: "demo_binance_key"
       - key: BINANCE_API_SECRET
-        sync: false
+        value: "demo_binance_secret"
       - key: GLASSNODE_API_KEY
-        sync: false
+        value: "demo_glassnode_key"
       - key: TELEGRAM_BOT_TOKEN
-        sync: false
+        value: "demo_telegram_token"
       - key: TELEGRAM_CHAT_ID
-        sync: false
+        value: "demo_telegram_chat_id"
 
 databases:
   # PostgreSQL for persistent data (Free Tier)
