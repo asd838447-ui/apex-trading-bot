@@ -38,7 +38,9 @@ export default function TradeHistory({ trades }) {
   };
 
   const formatTime = (iso) => {
+    if (!iso) return '—';
     const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
       ' ' +
       d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
@@ -99,10 +101,10 @@ export default function TradeHistory({ trades }) {
                     {trade.side}
                   </span>
                 </td>
-                <td>${trade.entry_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                <td>{trade.entry_price != null ? `$${trade.entry_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</td>
                 <td>
                   {trade.exit_price != null
-                    ? `$${trade.exit_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+                    ? `$${trade.exit_price?.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
                     : '—'}
                 </td>
                 <td>
@@ -111,7 +113,7 @@ export default function TradeHistory({ trades }) {
                       color: trade.pnl >= 0 ? 'var(--emerald)' : 'var(--rose)',
                       fontWeight: 600,
                     }}>
-                      {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      {trade.pnl >= 0 ? '+' : ''}${trade.pnl?.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       <span style={{ opacity: 0.6, fontSize: '10px', marginLeft: '4px' }}>
                         ({trade.pnl_pct >= 0 ? '+' : ''}{trade.pnl_pct}%)
                       </span>
@@ -123,13 +125,13 @@ export default function TradeHistory({ trades }) {
                     <span style={{
                       color: trade.rr >= 1 ? 'var(--emerald)' : 'var(--amber)',
                     }}>
-                      {trade.rr.toFixed(2)}
+                      {trade.rr?.toFixed(2)}
                     </span>
                   ) : '—'}
                 </td>
                 <td>
-                  <span className={`badge badge-${trade.status.toLowerCase()}`}>
-                    {trade.status}
+                  <span className={`badge badge-${(trade.status || 'OPEN').toLowerCase()}`}>
+                    {trade.status || 'OPEN'}
                   </span>
                 </td>
               </tr>

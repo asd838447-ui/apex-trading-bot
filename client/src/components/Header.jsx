@@ -15,11 +15,13 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
   const formatDate = (d) =>
     d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-  const priceFormatted = btcPrice.toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-  });
+  const priceFormatted = typeof btcPrice === 'number'
+    ? btcPrice.toLocaleString('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+      })
+    : '—';
 
   return (
     <header className="header glass-card" style={styles.header}>

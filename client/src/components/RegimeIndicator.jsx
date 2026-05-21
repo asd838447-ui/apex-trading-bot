@@ -46,7 +46,7 @@ function RegimeTooltip({ active, payload }) {
 }
 
 export default function RegimeIndicator({ regime }) {
-  const { current, confidence, history } = regime;
+  const { current = 'FLAT', confidence = 0, history = [] } = regime || {};
   const config = REGIME_CONFIG[current] || REGIME_CONFIG.FLAT;
   const IconComponent = config.icon;
 
@@ -111,13 +111,13 @@ export default function RegimeIndicator({ regime }) {
             fontWeight: 700,
             color: config.color,
           }}>
-            {confidence.toFixed(1)}%
+            {typeof confidence === 'number' ? confidence.toFixed(1) : '0.0'}%
           </span>
         </div>
         <div style={styles.confTrack}>
           <div style={{
             ...styles.confFill,
-            width: `${confidence}%`,
+            width: `${confidence || 0}%`,
             background: `linear-gradient(90deg, ${config.color}99, ${config.color})`,
           }} />
         </div>

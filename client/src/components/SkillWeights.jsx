@@ -34,12 +34,12 @@ function BarRow({ skill, index, maxWeight }) {
           }}
         />
       </div>
-      <span className="mono" style={styles.barValue}>{skill.weight.toFixed(1)}%</span>
+      <span className="mono" style={styles.barValue}>{typeof skill.weight === 'number' ? `${skill.weight.toFixed(1)}%` : '0.0%'}</span>
       <span className="mono" style={{
         ...styles.barAccuracy,
-        color: skill.accuracy >= 70 ? 'var(--emerald)' : skill.accuracy >= 55 ? 'var(--amber)' : 'var(--rose)',
+        color: (skill.accuracy || 0) >= 70 ? 'var(--emerald)' : (skill.accuracy || 0) >= 55 ? 'var(--amber)' : 'var(--rose)',
       }}>
-        {skill.accuracy.toFixed(0)}%
+        {typeof skill.accuracy === 'number' ? `${skill.accuracy.toFixed(0)}%` : '0%'}
       </span>
     </div>
   );
@@ -57,9 +57,9 @@ function RadarTooltip({ active, payload }) {
 }
 
 export default function SkillWeights({ signals }) {
-  const { skills } = signals;
+  const { skills = [] } = signals || {};
 
-  const maxWeight = useMemo(() => Math.max(...skills.map((s) => s.weight), 1), [skills]);
+  const maxWeight = useMemo(() => Math.max(...skills.map((s) => s.weight || 0), 1), [skills]);
 
   const radarData = useMemo(() => {
     return skills.map((s) => ({

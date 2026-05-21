@@ -39,10 +39,16 @@ function RiskLevel({ value, max = 10 }) {
 
 export default function RiskMonitor({ risk, btcPrice }) {
   const {
-    positionSize, leverage, stopLoss, takeProfit,
-    dailyPnl, maxDrawdown, riskPerTrade,
-    tiltGuard, lossStreak,
-  } = risk;
+    positionSize = 0.0,
+    leverage = 5,
+    stopLoss = 0.0,
+    takeProfit = 0.0,
+    dailyPnl = 0.0,
+    maxDrawdown = 0.0,
+    riskPerTrade = 0.0,
+    tiltGuard = { active: false, cooldownSec: 0 },
+    lossStreak = 0,
+  } = risk || {};
 
   const formatMin = (sec) => {
     const m = Math.floor(sec / 60);
@@ -72,25 +78,25 @@ export default function RiskMonitor({ risk, btcPrice }) {
       <div style={styles.metricsGrid}>
         <RiskMetric
           label="Position Size"
-          value={positionSize.toFixed(3)}
+          value={typeof positionSize === 'number' ? positionSize.toFixed(3) : '0.000'}
           unit=" BTC"
           icon={Target}
         />
         <RiskMetric
           label="Leverage"
-          value={`${leverage}×`}
-          color={leverage > 5 ? 'var(--amber)' : 'var(--text-primary)'}
+          value={`${leverage || 0}×`}
+          color={(leverage || 0) > 5 ? 'var(--amber)' : 'var(--text-primary)'}
           icon={Flame}
         />
         <RiskMetric
           label="Stop Loss"
-          value={`$${stopLoss.toLocaleString('en-US', { minimumFractionDigits: 0 })}`}
+          value={typeof stopLoss === 'number' ? `$${stopLoss.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : '—'}
           color="var(--rose)"
           icon={ArrowDown}
         />
         <RiskMetric
           label="Take Profit"
-          value={`$${takeProfit.toLocaleString('en-US', { minimumFractionDigits: 0 })}`}
+          value={typeof takeProfit === 'number' ? `$${takeProfit.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : '—'}
           color="var(--emerald)"
           icon={Target}
         />
@@ -103,19 +109,19 @@ export default function RiskMonitor({ risk, btcPrice }) {
           <span className="mono" style={{
             fontSize: 'var(--text-sm)',
             fontWeight: 700,
-            color: dailyPnl >= 0 ? 'var(--emerald)' : 'var(--rose)',
+            color: (dailyPnl || 0) >= 0 ? 'var(--emerald)' : 'var(--rose)',
           }}>
-            {dailyPnl >= 0 ? '+' : ''}${dailyPnl.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            {typeof dailyPnl === 'number' ? `${dailyPnl >= 0 ? '+' : ''}$${dailyPnl.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
           </span>
         </div>
         <div style={styles.dailyPnlBar}>
           <div style={styles.dailyPnlCenter} />
           <div style={{
             position: 'absolute',
-            [dailyPnl >= 0 ? 'left' : 'right']: '50%',
-            width: `${Math.min(Math.abs(dailyPnl) / 10, 50)}%`,
+            [(dailyPnl || 0) >= 0 ? 'left' : 'right']: '50%',
+            width: `${Math.min(Math.abs(dailyPnl || 0) / 10, 50)}%`,
             height: '100%',
-            background: dailyPnl >= 0 ? 'var(--emerald)' : 'var(--rose)',
+            background: (dailyPnl || 0) >= 0 ? 'var(--emerald)' : 'var(--rose)',
             borderRadius: '2px',
             transition: 'width 0.5s ease',
             opacity: 0.7,
@@ -129,17 +135,17 @@ export default function RiskMonitor({ risk, btcPrice }) {
           <span style={styles.metricLabel}>Max DD</span>
           <span className="mono" style={{
             ...styles.bottomValue,
-            color: maxDrawdown > 10 ? 'var(--rose)' : maxDrawdown > 5 ? 'var(--amber)' : 'var(--emerald)',
+            color: (maxDrawdown || 0) > 10 ? 'var(--rose)' : (maxDrawdown || 0) > 5 ? 'var(--amber)' : 'var(--emerald)',
           }}>
-            {maxDrawdown.toFixed(1)}%
+            {typeof maxDrawdown === 'number' ? `${maxDrawdown.toFixed(1)}%` : '0.0%'}
           </span>
-          <RiskLevel value={maxDrawdown} max={15} />
+          <RiskLevel value={maxDrawdown || 0} max={15} />
         </div>
 
         <div style={styles.bottomMetric}>
           <span style={styles.metricLabel}>Risk/Trade</span>
           <span className="mono" style={styles.bottomValue}>
-            {riskPerTrade.toFixed(1)}%
+            {typeof riskPerTrade === 'number' ? `${riskPerTrade.toFixed(1)}%` : '0.0%'}
           </span>
         </div>
 
@@ -147,9 +153,9 @@ export default function RiskMonitor({ risk, btcPrice }) {
           <span style={styles.metricLabel}>Loss Streak</span>
           <span className="mono" style={{
             ...styles.bottomValue,
-            color: lossStreak >= 3 ? 'var(--rose)' : 'var(--text-primary)',
+            color: (lossStreak || 0) >= 3 ? 'var(--rose)' : 'var(--text-primary)',
           }}>
-            {lossStreak}
+            {lossStreak || 0}
           </span>
         </div>
       </div>
@@ -157,10 +163,10 @@ export default function RiskMonitor({ risk, btcPrice }) {
       {/* Tilt Guard */}
       <div style={{
         ...styles.tiltGuard,
-        borderColor: tiltGuard.active ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.06)',
-        background: tiltGuard.active ? 'rgba(239,68,68,0.06)' : 'rgba(255,255,255,0.02)',
+        borderColor: tiltGuard?.active ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.06)',
+        background: tiltGuard?.active ? 'rgba(239,68,68,0.06)' : 'rgba(255,255,255,0.02)',
       }}>
-        {tiltGuard.active ? (
+        {tiltGuard?.active ? (
           <Lock size={13} color="var(--rose)" />
         ) : (
           <Unlock size={13} color="var(--emerald)" />
@@ -168,13 +174,13 @@ export default function RiskMonitor({ risk, btcPrice }) {
         <span style={{
           fontSize: 'var(--text-xs)',
           fontWeight: 600,
-          color: tiltGuard.active ? 'var(--rose)' : 'var(--emerald)',
+          color: tiltGuard?.active ? 'var(--rose)' : 'var(--emerald)',
         }}>
-          Tilt Guard: {tiltGuard.active ? 'LOCKED' : 'OK'}
+          Tilt Guard: {tiltGuard?.active ? 'LOCKED' : 'OK'}
         </span>
-        {tiltGuard.active && (
+        {tiltGuard?.active && (
           <span className="mono" style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-            {formatMin(tiltGuard.cooldownSec)} remaining
+            {formatMin(tiltGuard?.cooldownSec || 0)} remaining
           </span>
         )}
       </div>

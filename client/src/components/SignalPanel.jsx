@@ -57,7 +57,7 @@ const SKILL_COLORS = {
 };
 
 export default function SignalPanel({ signals }) {
-  const { skills, compositeScore, action, confidence } = signals;
+  const { skills = [], compositeScore = 0.0, action = 'WAIT', confidence = 0 } = signals || {};
 
   return (
     <div className="glass-card glow-purple" style={{ height: '100%' }}>
@@ -80,7 +80,7 @@ export default function SignalPanel({ signals }) {
               color: compositeScore > 0 ? 'var(--emerald)' : compositeScore < 0 ? 'var(--rose)' : 'var(--amber)',
             }}
           >
-            {compositeScore > 0 ? '+' : ''}{compositeScore.toFixed(1)}
+            {typeof compositeScore === 'number' ? `${compositeScore > 0 ? '+' : ''}${compositeScore.toFixed(1)}` : '0.0'}
           </span>
         </div>
 
@@ -104,14 +104,14 @@ export default function SignalPanel({ signals }) {
             <div
               style={{
                 ...styles.confGaugeFill,
-                width: `${confidence}%`,
-                background: confidence > 70
-                  ? 'var(--emerald)' : confidence > 40
+                width: `${confidence || 0}%`,
+                background: (confidence || 0) > 70
+                  ? 'var(--emerald)' : (confidence || 0) > 40
                     ? 'var(--amber)' : 'var(--rose)',
               }}
             />
           </div>
-          <span className="mono" style={styles.confValue}>{confidence}%</span>
+          <span className="mono" style={styles.confValue}>{confidence || 0}%</span>
         </div>
       </div>
 
@@ -134,9 +134,9 @@ export default function SignalPanel({ signals }) {
             </div>
 
             <div style={styles.skillMeta}>
-              <span className="mono" style={styles.skillWeight}>{skill.weight.toFixed(1)}%</span>
+              <span className="mono" style={styles.skillWeight}>{typeof skill.weight === 'number' ? `${skill.weight.toFixed(1)}%` : '0.0%'}</span>
               <ConfidenceBar
-                value={skill.confidence}
+                value={skill.confidence || 0}
                 color={SKILL_COLORS[skill.category] || 'var(--cyan)'}
               />
             </div>

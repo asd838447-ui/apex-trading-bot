@@ -13,6 +13,7 @@ from typing import Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 from server.api.routes import _generate_demo_signals, _generate_demo_regime
+from server.tasks.state import market_state
 
 logger = logging.getLogger(__name__)
 
@@ -123,21 +124,18 @@ async def ws_endpoint(websocket: WebSocket):
 
 async def _send_periodic_updates(websocket: WebSocket):
     """Отправляет периодические обновления клиенту."""
-    base_price = 69500.0
-
     try:
+        await market_state.initialize_if_needed()
+        
         while True:
-            # 1. Симуляция обновления цены (каждые 2 секунды)
-            price_change = random.gauss(0, 50)
-            base_price = max(60000, min(80000, base_price + price_change))
-
+            # 1. Отправка реальной цены (каждые 2 секунды)
             await manager.send_personal(websocket, {
                 "type": "price_update",
                 "data": {
                     "symbol": "BTCUSDT",
-                    "price": round(base_price, 2),
-                    "change_24h": round(random.uniform(-3, 3), 2),
-                    "volume_24h": round(random.uniform(20000, 50000), 0),
+                    "price": round(market_state.btc_price, 2),
+                    "change_24h": round(market_state.price_change_24h, 2),
+                    "volume_24h": round(market_state.volume_24h, 0),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             })
@@ -146,7 +144,7 @@ async def _send_periodic_updates(websocket: WebSocket):
 
             # 2. Обновление сигналов (каждые 8 секунд)
             if int(time.time()) % 8 < 2:
-                signals = _generate_demo_signals()
+                signals = market_state.signals if market_state.signals else _generate_demo_signals()
                 await manager.send_personal(websocket, {
                     "type": "signal_update",
                     "data": signals,
@@ -154,28 +152,18 @@ async def _send_periodic_updates(websocket: WebSocket):
 
             # 3. Обновление режима рынка (каждые 15 секунд)
             if int(time.time()) % 15 < 2:
-                regime = _generate_demo_regime()
                 await manager.send_personal(websocket, {
                     "type": "regime_update",
-                    "data": regime,
+                    "data": {
+                        "current": market_state.regime,
+                        "confidence": market_state.regime_confidence,
+                        "history": _generate_demo_regime()["history"]
+                    },
                 })
 
             # 4. Обновление параметров риска (каждые 12 секунд)
             if int(time.time()) % 12 < 2:
-                risk_data = {
-                    "positionSize": round(random.uniform(0.05, 0.45), 3),
-                    "leverage": random.randint(3, 8),
-                    "stopLoss": round(base_price * 0.985, 2),
-                    "takeProfit": round(base_price * 1.035, 2),
-                    "dailyPnl": round(random.uniform(-350, 750), 2),
-                    "maxDrawdown": round(random.uniform(2.5, 5.5), 2),
-                    "riskPerTrade": round(random.uniform(0.8, 1.5), 2),
-                    "tiltGuard": {
-                        "active": random.random() > 0.85,
-                        "cooldownSec": random.randint(0, 180) if random.random() > 0.85 else 0
-                    },
-                    "lossStreak": random.randint(0, 2),
-                }
+                risk_data = market_state.get_risk_metrics()
                 await manager.send_personal(websocket, {
                     "type": "risk_update",
                     "data": risk_data,
@@ -183,12 +171,15 @@ async def _send_periodic_updates(websocket: WebSocket):
 
             # 5. Обновление equity (каждые 20 секунд)
             if int(time.time()) % 20 < 2:
+                daily_pnl = round(sum(t["pnl"] for t in market_state.trades if t["time"][:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
                 await manager.send_personal(websocket, {
                     "type": "equity_update",
                     "data": {
-                        "equity": round(10000 + random.gauss(500, 200), 2),
-                        "daily_pnl": round(random.gauss(50, 100), 2),
+                        "equity": market_state.current_equity,
+                        "daily_pnl": daily_pnl,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                        "drawdown": "0.00",
                     },
                 })
 

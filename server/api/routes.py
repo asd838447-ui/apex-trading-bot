@@ -19,6 +19,7 @@ from server.api.auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from server.config import settings
+from server.tasks.state import market_state
 
 logger = logging.getLogger(__name__)
 
@@ -196,35 +197,31 @@ async def login(request: LoginRequest):
 @router.get("/status")
 async def get_status():
     """Статус системы с полным набором данных для инициализации дашборда."""
-    # Get risk using same logic as /risk
-    risk_data = {
-        "positionSize": 0.25,
-        "leverage": 5,
-        "stopLoss": 68420.0,
-        "takeProfit": 72500.0,
-        "dailyPnl": 420.50,
-        "maxDrawdown": 4.25,
-        "riskPerTrade": 1.0,
-        "tiltGuard": {"active": False, "cooldownSec": 0},
-        "lossStreak": 0,
-    }
+    # Ensure state has been initialized (e.g. loads from DB)
+    await market_state.initialize_if_needed()
+    
+    risk_data = market_state.get_risk_metrics()
     
     return {
         "status": "running",
         "bot_mode": "paper" if settings.DEMO_MODE else "live",
-        "btc_price": 69427.50,
-        "equity_curve": _generate_demo_equity(90),
-        "trade_history": _generate_demo_trades(20),
-        "signals": _generate_demo_signals(),
+        "btc_price": market_state.btc_price,
+        "equity_curve": market_state.equity_curve,
+        "trade_history": market_state.trades[:20],
+        "signals": market_state.signals if market_state.signals else _generate_demo_signals(),
         "risk": risk_data,
-        "regime": _generate_demo_regime(),
+        "regime": {
+            "current": market_state.regime,
+            "confidence": market_state.regime_confidence,
+            "history": _generate_demo_regime()["history"]
+        },
         "uptime": "active",
         "version": "1.0.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "services": {
             "database": "connected" if not settings.DEMO_MODE else "demo",
             "redis": "connected" if not settings.DEMO_MODE else "demo",
-            "binance_ws": "connected" if not settings.DEMO_MODE else "demo",
+            "binance_ws": "connected",
         },
     }
 
@@ -250,7 +247,8 @@ async def get_trades(
     limit: int = Query(default=20, ge=1, le=100),
 ):
     """История сделок."""
-    return {"trades": _generate_demo_trades(limit)}
+    await market_state.initialize_if_needed()
+    return {"trades": market_state.trades[:limit]}
 
 
 # === Equity ===
@@ -260,21 +258,24 @@ async def get_equity(
     days: int = Query(default=90, ge=1, le=365),
 ):
     """Данные equity curve."""
-    data = _generate_demo_equity(days)
+    await market_state.initialize_if_needed()
+    data = market_state.equity_curve[-days:] if market_state.equity_curve else []
+    
     if data:
         current = data[-1]["equity"]
         initial = data[0]["equity"]
         total_pnl = current - initial
         total_pct = (total_pnl / initial) * 100
     else:
-        current = 10000
+        current = market_state.current_equity
+        initial = market_state.initial_equity
         total_pnl = 0
         total_pct = 0
 
     return {
         "equity_curve": data,
         "current_equity": round(current, 2),
-        "initial_equity": round(initial, 2) if data else 10000,
+        "initial_equity": round(initial, 2),
         "total_pnl": round(total_pnl, 2),
         "total_pnl_pct": round(total_pct, 2),
     }
