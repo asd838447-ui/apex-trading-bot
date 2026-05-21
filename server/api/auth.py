@@ -3,6 +3,7 @@ APEX Trading Bot — JWT Authentication
 JWT токены, хеширование паролей и FastAPI dependencies для авторизации.
 """
 
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -10,7 +11,6 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from server.config import settings
 
@@ -20,16 +20,24 @@ logger = logging.getLogger(__name__)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 часа
 
-# Хеширование паролей
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 # Security scheme
 security = HTTPBearer(auto_error=False)
+
+
+def hash_password(password: str) -> str:
+    """Хеширует пароль с SHA-256."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Проверяет пароль по хешу."""
+    return hash_password(plain_password) == hashed_password
+
 
 # Демо-пользователь (в продакшне — из БД)
 DEMO_USER = {
     "username": "admin",
-    "hashed_password": pwd_context.hash("apex2024"),
+    "hashed_password": hash_password("apex2024"),
     "role": "admin",
 }
 
@@ -39,13 +47,6 @@ def create_access_token(
 ) -> str:
     """
     Создаёт JWT access token.
-
-    Args:
-        data: payload для токена (обычно {"sub": username})
-        expires_delta: время жизни токена
-
-    Returns:
-        Закодированный JWT строкой
     """
     to_encode = data.copy()
 
@@ -67,12 +68,6 @@ def create_access_token(
 def verify_token(token: str) -> Optional[dict]:
     """
     Верифицирует JWT токен и возвращает payload.
-
-    Args:
-        token: JWT строка
-
-    Returns:
-        dict с payload или None при ошибке
     """
     try:
         payload = jwt.decode(
@@ -84,26 +79,9 @@ def verify_token(token: str) -> Optional[dict]:
         return None
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Проверяет пароль по хешу."""
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def hash_password(password: str) -> str:
-    """Хеширует пароль с bcrypt."""
-    return pwd_context.hash(password)
-
-
 def authenticate_user(username: str, password: str) -> Optional[dict]:
     """
     Аутентификация пользователя.
-
-    Args:
-        username: имя пользователя
-        password: пароль (открытый текст)
-
-    Returns:
-        dict с данными пользователя или None
     """
     # Демо-режим: один пользователь admin/apex2024
     if username == DEMO_USER["username"]:
@@ -120,9 +98,6 @@ async def get_current_user(
 ) -> dict:
     """
     FastAPI dependency для получения текущего пользователя из JWT.
-
-    Raises:
-        HTTPException 401 если токен невалиден
     """
     # В демо-режиме разрешаем доступ без токена
     if settings.DEMO_MODE and credentials is None:
