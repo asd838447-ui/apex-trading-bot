@@ -69,12 +69,24 @@ async def fetch_metrics() -> Dict[str, Optional[float]]:
 
 
 def _demo_metrics() -> Dict[str, Optional[float]]:
-    """Return plausible demo values when no API key is set."""
+    """Return plausible dynamic demo values when no API key is set."""
+    import random
+    import time
+    
+    # Use time-based seed to make changes progressive but somewhat consistent
+    seed = int(time.time() / 3600)  # changes every hour
+    random.seed(seed)
+    
+    base_sopr = 1.02 + random.uniform(-0.05, 0.05)
+    base_nupl = 0.55 + random.uniform(-0.1, 0.1)
+    base_mvrv = 2.3 + random.uniform(-0.3, 0.3)
+    base_aa = 950_000 + random.randint(-50000, 50000)
+    
     return {
-        "sopr": 1.02,
-        "nupl": 0.55,
-        "mvrv": 2.3,
-        "active_addresses": 950_000,
+        "sopr": base_sopr,
+        "nupl": base_nupl,
+        "mvrv": base_mvrv,
+        "active_addresses": base_aa,
     }
 
 

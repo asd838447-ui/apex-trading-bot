@@ -117,7 +117,11 @@ class Settings:
 
     @property
     def has_glassnode(self) -> bool:
-        return bool(self.GLASSNODE_API_KEY)
+        if not self.GLASSNODE_API_KEY:
+            return False
+        if "demo" in self.GLASSNODE_API_KEY.lower() or "placeholder" in self.GLASSNODE_API_KEY.lower():
+            return False
+        return True
 
     @property
     def has_telegram(self) -> bool:
