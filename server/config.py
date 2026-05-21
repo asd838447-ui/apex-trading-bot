@@ -42,9 +42,11 @@ class Settings:
 
     # ── Database ────────────────────────────────────────────────────────
     DATABASE_URL: str = field(
-        default_factory=lambda: _env(
-            "DATABASE_URL",
-            "sqlite+aiosqlite:///./apex_demo.db",
+        default_factory=lambda: (
+            _env("DATABASE_URL", "sqlite+aiosqlite:///./apex_demo.db")
+            .replace("postgres://", "postgresql+asyncpg://")
+            .replace("postgresql://", "postgresql+asyncpg://")
+            .replace("postgresql+asyncpg+asyncpg://", "postgresql+asyncpg://")
         )
     )
 
