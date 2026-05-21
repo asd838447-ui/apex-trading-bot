@@ -1,4 +1,4 @@
-# render.yaml — Render Blueprint for APEX Trading Bot
+# render.yaml — Render Blueprint for APEX Trading Bot (Free Tier)
 # Deploy: connect GitHub repo → Render auto-detects this file
 
 services:
@@ -7,7 +7,7 @@ services:
     name: apex-trading-bot
     runtime: python
     region: frankfurt  # EU region
-    plan: starter
+    plan: free
     buildCommand: |
       pip install -r requirements.txt
       cd client && npm install && npm run build && cd ..
@@ -21,11 +21,6 @@ services:
       - key: DATABASE_URL
         fromDatabase:
           name: apex-db
-          property: connectionURI
-      - key: REDIS_URL
-        fromService:
-          name: apex-redis
-          type: redis
           property: connectionURI
       - key: JWT_SECRET_KEY
         generateValue: true
@@ -42,19 +37,11 @@ services:
       - key: TELEGRAM_CHAT_ID
         sync: false
 
-  # Redis for caching, queues, tilt guard
-  - type: redis
-    name: apex-redis
-    region: frankfurt
-    plan: starter
-    ipAllowList: []  # only internal access
-    maxmemoryPolicy: allkeys-lru
-
 databases:
-  # PostgreSQL for persistent data
+  # PostgreSQL for persistent data (Free Tier)
   - name: apex-db
     region: frankfurt
-    plan: starter
+    plan: free
     databaseName: apex_trading
     postgresMajorVersion: "15"
     ipAllowList: []  # only internal access
