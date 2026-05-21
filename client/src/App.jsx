@@ -57,10 +57,10 @@ function generateTradeHistory(count = 20) {
       time: new Date(now - i * 3600000 * (2 + Math.random() * 10)).toISOString(),
       symbol: 'BTC/USDT',
       side,
-      entry: Math.round(entry * 100) / 100,
-      exit: status === 'OPEN' ? null : Math.round(exit * 100) / 100,
+      entry_price: Math.round(entry * 100) / 100,
+      exit_price: status === 'OPEN' ? null : Math.round(exit * 100) / 100,
       pnl: status === 'OPEN' ? null : Math.round(pnlPct * entry / 100 * 100) / 100,
-      pnlPct: status === 'OPEN' ? null : Math.round(pnlPct * 100) / 100,
+      pnl_pct: status === 'OPEN' ? null : Math.round(pnlPct * 100) / 100,
       rr: status === 'OPEN' ? null : Math.round(rr * 100) / 100,
       status,
     });
