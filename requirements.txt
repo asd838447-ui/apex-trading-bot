@@ -5,6 +5,7 @@ uvicorn[standard]==0.27.1
 python-multipart==0.0.9
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
 pydantic==2.6.1
 pydantic-settings==2.1.0
 
@@ -22,7 +23,6 @@ aioredis==2.0.1
 numpy==1.26.4
 pandas==2.2.0
 scikit-learn==1.4.0
-hmmlearn==0.3.0
 scipy==1.12.0
 
 # NLP (lightweight - no transformers/torch for Render free tier)
