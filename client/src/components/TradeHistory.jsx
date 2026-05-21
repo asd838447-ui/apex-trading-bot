@@ -99,10 +99,10 @@ export default function TradeHistory({ trades }) {
                     {trade.side}
                   </span>
                 </td>
-                <td>${trade.entry.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                <td>${trade.entry_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
                 <td>
-                  {trade.exit != null
-                    ? `$${trade.exit.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+                  {trade.exit_price != null
+                    ? `$${trade.exit_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
                     : '—'}
                 </td>
                 <td>
@@ -113,7 +113,7 @@ export default function TradeHistory({ trades }) {
                     }}>
                       {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       <span style={{ opacity: 0.6, fontSize: '10px', marginLeft: '4px' }}>
-                        ({trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct}%)
+                        ({trade.pnl_pct >= 0 ? '+' : ''}{trade.pnl_pct}%)
                       </span>
                     </span>
                   ) : '—'}
