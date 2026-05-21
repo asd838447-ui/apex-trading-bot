@@ -1,0 +1,60 @@
+# render.yaml — Render Blueprint for APEX Trading Bot
+# Deploy: connect GitHub repo → Render auto-detects this file
+
+services:
+  # FastAPI Backend + Static Frontend
+  - type: web
+    name: apex-trading-bot
+    runtime: python
+    region: frankfurt  # EU region
+    plan: starter
+    buildCommand: |
+      pip install -r requirements.txt
+      cd client && npm install && npm run build && cd ..
+    startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.7"
+      - key: NODE_VERSION
+        value: "20.11.0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: apex-db
+          property: connectionURI
+      - key: REDIS_URL
+        fromService:
+          name: apex-redis
+          type: redis
+          property: connectionURI
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DEMO_MODE
+        value: "true"
+      - key: BINANCE_API_KEY
+        sync: false  # set manually
+      - key: BINANCE_API_SECRET
+        sync: false
+      - key: GLASSNODE_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+  # Redis for caching, queues, tilt guard
+  - type: redis
+    name: apex-redis
+    region: frankfurt
+    plan: starter
+    ipAllowList: []  # only internal access
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  # PostgreSQL for persistent data
+  - name: apex-db
+    region: frankfurt
+    plan: starter
+    databaseName: apex_trading
+    postgresMajorVersion: "15"
+    ipAllowList: []  # only internal access
