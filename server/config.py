@@ -36,7 +36,7 @@ def _env_bool(key: str, default: bool = False) -> bool:
     return default
 
 
-@dataclass(frozen=True)
+@dataclass
 class Settings:
     """Immutable application settings."""
 
@@ -112,10 +112,9 @@ class Settings:
     )
 
     # ── Derived helpers ─────────────────────────────────────────────────
-    @property
-    def demo_mode(self) -> bool:
-        """True when Binance API keys are not configured."""
-        return not self.BINANCE_API_KEY or not self.BINANCE_API_SECRET
+    DEMO_MODE: bool = field(
+        default_factory=lambda: _env_bool("DEMO_MODE", not _env("BINANCE_API_KEY") or not _env("BINANCE_API_SECRET"))
+    )
 
     @property
     def has_glassnode(self) -> bool:
