@@ -80,6 +80,23 @@ class RegimeClassifier:
         self._model: Optional[object] = None
         self._label_map: dict[int, str] = dict(_REGIME_LABELS)
         self._fitted: bool = False
+        self._load_pretrained_model()
+
+    def _load_pretrained_model(self) -> None:
+        import os
+        import pickle
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(current_dir, "hmm_model.pkl")
+        if os.path.exists(model_path):
+            try:
+                with open(model_path, "rb") as f:
+                    payload = pickle.load(f)
+                self._model = payload["model"]
+                self._label_map = payload["label_map"]
+                self._fitted = True
+                logger.info("Successfully loaded pre-trained HMM model parameters from %s", model_path)
+            except Exception as exc:
+                logger.warning("Failed to load pre-trained HMM model: %s. Using fallback.", exc)
 
     # ── Fit ──────────────────────────────────────────────────────────
     def fit(self, df_history: pd.DataFrame) -> None:

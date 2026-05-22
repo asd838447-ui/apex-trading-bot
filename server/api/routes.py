@@ -10,6 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from server.api.auth import (
     authenticate_user,
@@ -119,7 +120,7 @@ async def get_status():
 
     return {
         "status": "running",
-        "bot_mode": "live",
+        "bot_mode": "demo" if settings.DEMO_MODE else "live",
         "btc_price": market_state.btc_price,
         "equity_curve": market_state.equity_curve,
         "trade_history": market_state.trades[:20],
@@ -143,8 +144,36 @@ async def get_status():
 
 @router.get("/health")
 async def health_check():
-    """Health check для Render."""
-    return {"status": "ok"}
+    """Health check возвращает состояние БД, Redis и версию бота."""
+    db_status = "disconnected"
+    redis_status = "disconnected"
+    
+    # Check DB
+    try:
+        from server.db.database import session_scope
+        async with session_scope() as session:
+            await session.execute(text("SELECT 1"))
+        db_status = "connected"
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        
+    # Check Redis
+    try:
+        import redis
+        r = redis.from_url(settings.REDIS_URL, decode_responses=True, socket_timeout=1)
+        r.ping()
+        redis_status = "connected"
+    except Exception as e:
+        logger.warning(f"Redis health check failed: {e}")
+
+    return {
+        "status": "ok" if db_status == "connected" else "degraded",
+        "version": "1.0.0",
+        "services": {
+            "database": db_status,
+            "redis": redis_status,
+        }
+    }
 
 
 # === Signals ===

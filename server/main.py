@@ -13,6 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+
 from server.config import settings
 from server.db.database import init_db, close_db
 from server.api.routes import router as api_router
@@ -80,12 +84,37 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware that adds vital security headers to block Clickjacking, MIME sniffing,
+    and enforce HSTS / secure referrer policies.
+    """
+    async def dispatch(self, request, call_next):
+        response: Response = await call_next(request)
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://* wss://*;"
+            " img-src 'self' data: https:;"
+        )
+        return response
+
+
 app = FastAPI(
     title="APEX Trading Bot API",
     description="Backend API Gateway for APEX Algorithmic Trading Bot",
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Register Security Headers middleware
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Enable HTTPS Redirection ONLY when deployed to Render (or when not running locally in debug mode)
+if not settings.DEBUG and os.environ.get("RENDER"):
+    app.add_middleware(HTTPSRedirectMiddleware)
 
 # Wire CORS origins
 origins = ["http://localhost:5173", "http://localhost:3000"]

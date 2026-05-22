@@ -62,6 +62,7 @@ export default function useWebSocket(url) {
       ws.onclose = (event) => {
         if (!mountedRef.current) return;
         setIsConnected(false);
+        wsRef.current = null;
         stopHeartbeat();
         console.log('[WS] Disconnected, code:', event.code);
         scheduleReconnect();
@@ -69,6 +70,12 @@ export default function useWebSocket(url) {
 
       ws.onerror = (error) => {
         console.warn('[WS] Error:', error);
+        if (wsRef.current) {
+          try {
+            wsRef.current.close();
+          } catch (_) {}
+          wsRef.current = null;
+        }
       };
     } catch (err) {
       console.warn('[WS] Connection failed:', err);
