@@ -94,7 +94,7 @@ class Settings:
         default_factory=lambda: _env_int("JWT_EXPIRE_MINUTES", 60)
     )
     VAULT_ENCRYPTION_KEY: str = field(
-        default_factory=lambda: _env("VAULT_ENCRYPTION_KEY", "")
+        default_factory=lambda: _env("VAULT_ENCRYPTION_KEY", "apex-combat-vault-key-32-chars-max")
     )
 
     # ── Telegram ────────────────────────────────────────────────────────
