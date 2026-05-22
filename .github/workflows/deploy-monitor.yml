@@ -1,39 +1,51 @@
-name: Render Deploy Monitor & Auto-Fix
+name: Pre-Deploy Crash Test & Auto-Fix
 
 on:
   push:
     branches:
-      - main # Скрипт срабатывает только при обновлении основной ветки
+      - main # Срабатывает только когда код попадает в главную ветку (перед Render)
 
 permissions:
   contents: write
 
 jobs:
-  monitor-and-fix:
+  test-and-fix:
+    # ПРЕДОТВРАЩЕНИЕ БЕСКОНЕЧНОГО ЦИКЛА: 
+    # Скрипт не запустится, если последний коммит сделал сам бот
+    if: "!startsWith(github.event.head_commit.message, 'AI:')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Setup Python
+      - name: Setup Python 3.11 (Совпадение с Render)
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Install Dependencies
-        run: pip install google-genai requests
+      - name: Install Project Dependencies
+        run: |
+          # Устанавливаем все библиотеки твоего проекта (fastapi, uvicorn и т.д.)
+          pip install -r requirements.txt
+          
+          # Доустанавливаем библиотеку для ИИ, чтобы сработал наш скрипт
+          pip install google-genai
 
-      - name: Wait for Render and Validate Data
+      - name: Run Local Crash Test & AI
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          RENDER_APP_URL: "https://tvoy-bot.onrender.com" # ВАЖНО: Впиши сюда реальный URL твоего Render!
-        run: python .github/scripts/verify_live.py
+        # Запускаем наш Python-скрипт. Если он найдет баг, он перепишет main.py
+        run: python .github/scripts/test_and_fix.py
 
       - name: Auto-Commit AI Fixes
+        # ВАЖНО: Эта строчка заставляет GitHub сделать коммит, 
+        # даже если предыдущий шаг (краш-тест) выдал ошибку сервера!
+        if: always() 
         run: |
           git config --global user.name "AI QA-Bot"
           git config --global user.email "qa-bot@ai.com"
           git add .
-          # Если скрипт изменил файл (нашел ошибку), делаем коммит. Если изменений нет - ничего не делаем.
-          git diff --quiet && git diff --staged --quiet || (git commit -m "AI: Срочный фикс боевого сервера" && git push)
+          
+          # Проверяем, изменил ли ИИ файлы. Если да - пушим, если нет - ничего не делаем.
+          git diff --quiet && git diff --staged --quiet || (git commit -m "AI: Срочный фикс после краш-теста" && git push)
