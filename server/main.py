@@ -1,10 +1,3 @@
-"""
-APEX Trading Bot — FastAPI Main Application Entry Point
-Initializes the web server, mounts API routes, WebSocket endpoint, background tasks scheduler,
-and serves the React SPA from client/dist when built.
-"""
-
-import os
 import logging
 from contextlib import asynccontextmanager
 
@@ -19,7 +12,6 @@ from server.api.routes import router as api_router
 from server.api.ws import ws_endpoint
 from server.tasks.scheduler import start_background_tasks, stop_background_tasks
 
-# Setup logging
 logging.basicConfig(
     level=logging.getLevelName(settings.LOG_LEVEL),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -29,20 +21,17 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     logger.info("Initializing database...")
     try:
         await init_db()
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        # Proceed anyway if fallback DB handles it
 
     logger.info("Starting background tasks...")
     await start_background_tasks(app)
 
     yield
 
-    # Shutdown
     logger.info("Stopping background tasks...")
     await stop_background_tasks()
 
@@ -57,7 +46,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for local frontend dev server (default port 5173 for Vite)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex="http://localhost(:[0-9]+)?",
@@ -66,18 +54,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount REST API Router
 app.include_router(api_router)
 
 
-# Mount WebSocket Route
 @app.websocket("/ws")
 async def websocket_route(websocket: WebSocket):
     await ws_endpoint(websocket)
 
 
-# Serve Static Frontend Files (client/dist) in production/Render environment
-# This allows the backend to host the compiled React app on the same port.
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 client_dist_path = os.path.join(project_root, "client", "dist")
@@ -85,18 +69,12 @@ client_dist_path = os.path.join(project_root, "client", "dist")
 if os.path.exists(client_dist_path):
     logger.info(f"Serving static frontend files from: {client_dist_path}")
     
-    # Mount assets folder for bundle loads
     assets_path = os.path.join(client_dist_path, "assets")
     if os.path.exists(assets_path):
         app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
 
-    # Catch-all route to serve the Single Page Application index.html
     @app.get("/{fallback_path:path}")
     async def spa_fallback(fallback_path: str):
-        # Do not hijack API or websocket paths
-        if fallback_path.startswith("api/") or fallback_path == "ws":
-            return None
-            
         index_file = os.path.join(client_dist_path, "index.html")
         if os.path.exists(index_file):
             return FileResponse(index_file)
@@ -114,5 +92,3 @@ else:
             "message": "APEX Trading Bot API is running.",
             "frontend_status": "Not served (client/dist folder missing)",
             "docs": "/docs",
-        }
-# Проснись, GitHub

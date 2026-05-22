@@ -1,12 +1,7 @@
-# render.yaml — Render Blueprint for APEX Trading Bot (Free Tier)
-# Deploy: connect GitHub repo → Render auto-detects this file
-
-services:
-  # FastAPI Backend + Static Frontend
   - type: web
     name: apex-trading-bot
     runtime: python
-    region: frankfurt  # EU region
+    region: frankfurt
     plan: free
     buildCommand: |
       pip install -r requirements.txt
@@ -27,21 +22,19 @@ services:
       - key: DEMO_MODE
         value: "true"
       - key: BINANCE_API_KEY
-        value: "demo_binance_key"
+        sync: false
       - key: BINANCE_API_SECRET
-        value: "demo_binance_secret"
+        sync: false
       - key: GLASSNODE_API_KEY
-        value: "demo_glassnode_key"
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
-        value: "demo_telegram_token"
+        sync: false
       - key: TELEGRAM_CHAT_ID
-        value: "demo_telegram_chat_id"
+        sync: false
 
 databases:
-  # PostgreSQL for persistent data (Free Tier)
   - name: apex-db
     region: frankfurt
     plan: free
     databaseName: apex_trading
     postgresMajorVersion: "15"
-    ipAllowList: []  # only internal access
