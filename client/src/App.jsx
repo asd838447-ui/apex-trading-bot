@@ -47,6 +47,20 @@ export default function App() {
   const [botMode, setBotMode] = useState('live');
   const [systemStatus, setSystemStatus] = useState('running');
 
+  // Parallel Multi-Source feed statuses
+  const [feedStatuses, setFeedStatuses] = useState({
+    binanceFutures: 'disconnected',
+    binanceSpot: 'disconnected',
+    bybitFutures: 'disconnected',
+    bybitSpot: 'disconnected',
+    okxSpot: 'disconnected',
+  });
+  const [lastActiveSource, setLastActiveSource] = useState('Local Server');
+  const [ticksPerSecond, setTicksPerSecond] = useState(0);
+
+  // Ref to hold tick counter for frequency measurement
+  const tickCounterRef = useRef(0);
+
   // WebSocket
   const wsUrl = useMemo(() => {
     if (typeof window !== 'undefined') {
@@ -62,26 +76,36 @@ export default function App() {
 
   const lastDirectTickTimeRef = useRef(0);
 
-  // Direct real-time high-frequency Multi-Source WebSocket price feed (Zero lag with automatic fallbacks)
+  // Direct real-time high-frequency Multi-Source Parallel WebSocket price feed (Zero lag, instant aggregation)
   useEffect(() => {
-    let ws = null;
-    let reconnectTimer = null;
-    let watchdogTimer = null;
-    let currentSourceIdx = 0;
-
     const sources = [
       {
-        name: 'Binance Futures WS',
+        id: 'binanceFutures',
+        name: 'Binance Fut',
         url: 'wss://fstream.binance.com/ws/btcusdt@aggTrade',
         parse: (data) => data && data.p ? parseFloat(data.p) : null
       },
       {
-        name: 'Binance Spot WS',
+        id: 'binanceSpot',
+        name: 'Binance Spot',
         url: 'wss://stream.binance.com:9443/ws/btcusdt@aggTrade',
         parse: (data) => data && data.p ? parseFloat(data.p) : null
       },
       {
-        name: 'Bybit Spot WS',
+        id: 'bybitFutures',
+        name: 'Bybit Fut',
+        url: 'wss://stream.bybit.com/v5/public/linear',
+        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT'] },
+        parse: (data) => {
+          if (data && data.topic === 'publicTrade.BTCUSDT' && data.data && data.data[0]) {
+            return parseFloat(data.data[0].p);
+          }
+          return null;
+        }
+      },
+      {
+        id: 'bybitSpot',
+        name: 'Bybit Spot',
         url: 'wss://stream.bybit.com/v5/public/spot',
         subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT'] },
         parse: (data) => {
@@ -90,24 +114,33 @@ export default function App() {
           }
           return null;
         }
+      },
+      {
+        id: 'okxSpot',
+        name: 'OKX Spot',
+        url: 'wss://ws.okx.com:8443/ws/v5/public',
+        subscribe: { op: 'subscribe', args: [{ channel: 'trades', instId: 'BTC-USDT' }] },
+        parse: (data) => {
+          if (data && data.arg && data.arg.channel === 'trades' && data.data && data.data[0]) {
+            return parseFloat(data.data[0].px);
+          }
+          return null;
+        }
       }
     ];
 
-    const connectPriceWS = () => {
-      const source = sources[currentSourceIdx];
+    const activeConnections = {};
+    const reconnectTimers = {};
 
+    const connectSource = (source, reconnectDelay = 1000) => {
       try {
-        ws = new WebSocket(source.url);
+        const ws = new WebSocket(source.url);
+        activeConnections[source.id] = ws;
 
-        const resetWatchdog = () => {
-          if (watchdogTimer) clearTimeout(watchdogTimer);
-          watchdogTimer = setTimeout(() => {
-            moveToNextSource();
-          }, 6000);
-        };
+        setFeedStatuses((prev) => ({ ...prev, [source.id]: 'connecting' }));
 
         ws.onopen = () => {
-          resetWatchdog();
+          setFeedStatuses((prev) => ({ ...prev, [source.id]: 'connected' }));
           if (source.subscribe) {
             ws.send(JSON.stringify(source.subscribe));
           }
@@ -119,56 +152,62 @@ export default function App() {
             const price = source.parse(rawData);
             if (price && !isNaN(price)) {
               setBtcPrice(price);
+              setLastActiveSource(source.name);
+              tickCounterRef.current += 1;
               lastDirectTickTimeRef.current = Date.now();
-              resetWatchdog();
             }
           } catch (err) {
-            // Silence parser errors
+            // Ignore parser errors
           }
         };
 
         ws.onclose = () => {
-          cleanupTimers();
-          reconnectTimer = setTimeout(() => {
-            moveToNextSource();
-          }, 2000);
+          setFeedStatuses((prev) => ({ ...prev, [source.id]: 'disconnected' }));
+          scheduleReconnect(source, reconnectDelay);
         };
 
         ws.onerror = () => {
-          if (ws) ws.close();
+          ws.close();
         };
 
       } catch (err) {
-        cleanupTimers();
-        reconnectTimer = setTimeout(() => {
-          moveToNextSource();
-        }, 2000);
+        setFeedStatuses((prev) => ({ ...prev, [source.id]: 'disconnected' }));
+        scheduleReconnect(source, reconnectDelay);
       }
     };
 
-    const moveToNextSource = () => {
-      if (ws) {
-        ws.onclose = null;
-        ws.close();
-      }
-      cleanupTimers();
-      currentSourceIdx = (currentSourceIdx + 1) % sources.length;
-      connectPriceWS();
+    const scheduleReconnect = (source, delay) => {
+      if (reconnectTimers[source.id]) clearTimeout(reconnectTimers[source.id]);
+      
+      const nextDelay = Math.min(delay * 2, 30000);
+      const jitter = Math.random() * 1000;
+      
+      reconnectTimers[source.id] = setTimeout(() => {
+        connectSource(source, nextDelay);
+      }, delay + jitter);
     };
 
-    const cleanupTimers = () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (watchdogTimer) clearTimeout(watchdogTimer);
-    };
+    // Connect to all 5 sources in parallel on startup
+    sources.forEach((src) => connectSource(src));
 
-    connectPriceWS();
+    // Dynamic feed frequency calculator
+    const tpsTimer = setInterval(() => {
+      setTicksPerSecond(tickCounterRef.current);
+      tickCounterRef.current = 0;
+    }, 1000);
 
     return () => {
-      cleanupTimers();
-      if (ws) {
-        ws.onclose = null;
-        ws.close();
-      }
+      clearInterval(tpsTimer);
+      Object.keys(activeConnections).forEach((id) => {
+        const ws = activeConnections[id];
+        if (ws) {
+          ws.onclose = null;
+          ws.close();
+        }
+      });
+      Object.keys(reconnectTimers).forEach((id) => {
+        clearTimeout(reconnectTimers[id]);
+      });
     };
   }, []);
 
@@ -178,9 +217,10 @@ export default function App() {
     const { type, data } = lastMessage;
     switch (type) {
       case 'price_update':
-        // Use backend price update as a fallback if direct stream is lagging or inactive
+        // Use backend price update as a fallback if direct streams are lagging or inactive
         setBtcPrice((prev) => {
           if (Date.now() - lastDirectTickTimeRef.current > 3000 || prev === 0.0) {
+            setLastActiveSource('Local Server');
             return data.price;
           }
           return prev;
@@ -255,6 +295,9 @@ export default function App() {
         systemStatus={systemStatus}
         botMode={botMode}
         onToggleMode={toggleBotMode}
+        feedStatuses={feedStatuses}
+        lastActiveSource={lastActiveSource}
+        ticksPerSecond={ticksPerSecond}
       />
       <Dashboard
         equityCurve={equityCurve}

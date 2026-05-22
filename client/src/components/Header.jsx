@@ -1,7 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, Wifi, WifiOff, Zap, Clock, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Activity, Wifi, WifiOff, Zap, Clock } from 'lucide-react';
 
-export default function Header({ btcPrice, isConnected, systemStatus, botMode, onToggleMode }) {
+export default function Header({
+  btcPrice,
+  isConnected,
+  systemStatus,
+  botMode,
+  onToggleMode,
+  feedStatuses = {},
+  lastActiveSource = 'Local Server',
+  ticksPerSecond = 0
+}) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [priceColor, setPriceColor] = useState('var(--text)');
   const prevPriceRef = useRef(btcPrice);
@@ -40,6 +49,14 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
       })
     : '—';
 
+  const feedLabels = {
+    binanceFutures: 'Binance Fut',
+    binanceSpot: 'Binance Spot',
+    bybitFutures: 'Bybit Fut',
+    bybitSpot: 'Bybit Spot',
+    okxSpot: 'OKX Spot',
+  };
+
   return (
     <header className="header glass-card" style={styles.header}>
       {/* Left: Logo */}
@@ -55,11 +72,66 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
         </div>
       </div>
 
-      {/* Center: BTC Price + Status */}
+      {/* Center: BTC Price + Multi-Feed Panel */}
       <div style={styles.centerSection}>
         <div style={styles.priceBlock}>
-          <span style={styles.priceLabel}>BTC/USDT</span>
+          <span style={styles.priceLabel}>
+            BTC/USDT 
+            <span style={{
+              ...styles.sourceBadge,
+              boxShadow: lastActiveSource !== 'Local Server' ? '0 0 8px rgba(0, 212, 255, 0.2)' : 'none',
+              borderColor: lastActiveSource !== 'Local Server' ? 'rgba(0, 212, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)',
+              background: lastActiveSource !== 'Local Server' ? 'rgba(0, 212, 255, 0.08)' : 'rgba(255, 255, 255, 0.04)',
+              color: lastActiveSource !== 'Local Server' ? 'var(--cyan)' : 'var(--text-muted)'
+            }}>
+              {lastActiveSource.toUpperCase()}
+            </span>
+          </span>
           <span className="mono" style={{ ...styles.priceValue, color: priceColor, transition: 'color 0.15s ease' }}>{priceFormatted}</span>
+        </div>
+
+        <div className="divider" />
+
+        {/* Parallel Feeds Stream Panel */}
+        <div style={styles.feedsSection}>
+          <div style={styles.feedsHeader}>
+            <span style={styles.priceLabel}>PARALLEL PRICE SOURCES</span>
+            <span style={styles.speedValue} className="mono">
+              <Zap size={10} color="var(--cyan)" className="pulse-slow" style={{ marginRight: '3px' }} />
+              {ticksPerSecond} <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>t/s</span>
+            </span>
+          </div>
+          <div style={styles.feedsRow}>
+            {Object.entries(feedLabels).map(([key, label]) => {
+              const status = feedStatuses[key] || 'disconnected';
+              const isCurrent = lastActiveSource.toLowerCase() === label.toLowerCase();
+              let glowColor = 'rgba(255, 255, 255, 0.15)';
+              if (status === 'connected') glowColor = 'var(--cyan)';
+              else if (status === 'connecting') glowColor = 'var(--amber)';
+
+              return (
+                <div key={key} style={{
+                  ...styles.feedBadge,
+                  borderColor: status === 'connected' 
+                    ? (isCurrent ? 'rgba(0, 212, 255, 0.4)' : 'rgba(0, 212, 255, 0.15)') 
+                    : 'rgba(255, 255, 255, 0.04)',
+                  background: status === 'connected' 
+                    ? (isCurrent ? 'rgba(0, 212, 255, 0.06)' : 'rgba(0, 212, 255, 0.02)') 
+                    : 'rgba(255, 255, 255, 0.01)',
+                  color: status === 'connected' ? 'var(--text-primary)' : 'var(--text-muted)',
+                  boxShadow: isCurrent && status === 'connected' ? '0 0 10px rgba(0, 212, 255, 0.1)' : 'none'
+                }}>
+                  <span style={{
+                    ...styles.feedDot,
+                    background: glowColor,
+                    boxShadow: status === 'connected' ? `0 0 6px ${glowColor}` : 'none',
+                    animation: isCurrent && status === 'connected' ? 'pulse-fast 0.6s infinite alternate' : 'none'
+                  }} />
+                  {label}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="divider" />
@@ -191,18 +263,72 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-end',
+    minWidth: '150px',
   },
   priceLabel: {
     fontSize: 'var(--text-xs)',
     color: 'var(--text-muted)',
     fontWeight: 500,
     letterSpacing: '0.04em',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  sourceBadge: {
+    fontSize: '9px',
+    fontWeight: 700,
+    padding: '1px 5px',
+    borderRadius: '4px',
+    border: '1px solid',
+    transition: 'all 0.2s ease',
   },
   priceValue: {
     fontSize: 'var(--text-xl)',
     fontWeight: 700,
     color: 'var(--text-primary)',
     letterSpacing: '-0.02em',
+  },
+  feedsSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    flex: '1 1 auto',
+    maxWidth: '460px',
+  },
+  feedsHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  feedsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexWrap: 'wrap',
+  },
+  feedBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+    fontSize: '10px',
+    fontWeight: 600,
+    padding: '3px 8px',
+    borderRadius: '6px',
+    border: '1px solid',
+    transition: 'all 0.15s ease',
+  },
+  feedDot: {
+    width: '5px',
+    height: '5px',
+    borderRadius: '50%',
+    display: 'inline-block',
+  },
+  speedValue: {
+    fontSize: 'var(--text-xs)',
+    fontWeight: 600,
+    color: 'var(--cyan)',
+    display: 'flex',
+    alignItems: 'center',
   },
   statusBadges: {
     display: 'flex',
