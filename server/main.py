@@ -115,4 +115,4 @@ else:
             "frontend_status": "Not served (client/dist folder missing)",
             "docs": "/docs",
         }
-# Финальный запуск AI-бота.
+# Финальный запуск AI-бот
