@@ -35,4 +35,4 @@ jobs:
           git config --global user.email "ai@bot.com"
           git add .
           git commit -m "AI: Исправление архитектурных ошибок" || echo "Изменений нет"
-          git push
+          git push origin HEAD:${{ github.head_ref }}
