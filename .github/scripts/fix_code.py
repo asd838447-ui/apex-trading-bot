@@ -5,7 +5,7 @@ import os
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 # Используем flash (быструю и бесплатную версию)
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 def fix_file(file_path):
     print(f"Анализирую файл: {file_path}...")
