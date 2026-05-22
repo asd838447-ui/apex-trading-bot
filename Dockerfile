@@ -25,6 +25,6 @@ COPY server/ ./server/
 # Copy compiled frontend build from Stage 1 into the location served by FastAPI
 COPY --from=frontend-builder /app/client/dist ./client/dist
 
-# Expose port and run server via programmatic python launcher to handle cloud dynamic ports
+# Expose port and run server with shell expansion for $PORT to support dynamic cloud ports
 EXPOSE 8000
-CMD ["python", "run.py"]
+CMD ["sh", "-c", "uvicorn server.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
