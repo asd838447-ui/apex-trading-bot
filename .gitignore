@@ -6,6 +6,7 @@ __pycache__/
 *.egg
 *.egg-info/
 dist/
+!client/dist/
 build/
 .eggs/
 *.whl
@@ -42,7 +43,6 @@ node_modules/
 client/node_modules/
 
 # Build output
-client/dist/
 
 # Database
 *.db

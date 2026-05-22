@@ -9,15 +9,13 @@ services:
     region: frankfurt  # EU region
     plan: free
     buildCommand: |
+      set -e
       pip install -r requirements.txt
-      cd client && npm install && npm run build && cd ..
-    startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.7"
-      - key: NODE_VERSION
-        value: "20.11.0"
       - key: DATABASE_URL
         fromDatabase:
           name: apex-db
@@ -29,7 +27,15 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: DEMO_MODE
-        value: "false"
+        value: "true"
+      - key: BINANCE_TESTNET
+        value: "true"
+      - key: CORS_ORIGINS
+        value: ""
+      - key: JWT_ALGORITHM
+        value: "HS256"
+      - key: JWT_EXPIRATION_MINUTES
+        value: "1440"
       - key: BINANCE_API_KEY
         value: "demo_binance_key"
       - key: BINANCE_API_SECRET

@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from server.api.auth import (
@@ -21,7 +21,27 @@ from server.api.auth import (
 from server.config import settings
 from server.tasks.state import market_state
 
+import time
+from collections import defaultdict
+
 logger = logging.getLogger(__name__)
+
+class RateLimiter:
+    def __init__(self, requests_limit: int = 5, window_seconds: int = 60):
+        self.requests_limit = requests_limit
+        self.window_seconds = window_seconds
+        self.history = defaultdict(list)
+
+    def is_allowed(self, ip: str) -> bool:
+        now = time.time()
+        self.history[ip] = [t for t in self.history[ip] if now - t < self.window_seconds]
+        if len(self.history[ip]) >= self.requests_limit:
+            return False
+        self.history[ip].append(now)
+        return True
+
+# Rate limiter instance: 5 requests per 60 seconds
+login_limiter = RateLimiter(requests_limit=5, window_seconds=60)
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -48,8 +68,16 @@ class SettingsUpdate(BaseModel):
 # === Authentication ===
 
 @router.post("/auth/login", response_model=LoginResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, http_request: Request):
     """Авторизация и получение JWT токена."""
+    ip = http_request.client.host if http_request.client else "unknown"
+    if not login_limiter.is_allowed(ip):
+        logger.warning(f"Rate limit exceeded for IP: {ip} on /auth/login")
+        raise HTTPException(
+            status_code=429,
+            detail="Слишком много попыток входа. Пожалуйста, попробуйте позже.",
+        )
+
     user = authenticate_user(request.username, request.password)
     if not user:
         raise HTTPException(
@@ -282,12 +310,8 @@ async def update_settings(
     updated = {}
 
     if update.demo_mode is not None:
-        if update.demo_mode:
-            raise HTTPException(
-                status_code=400,
-                detail="Switching to Demo/Paper mode is strictly prohibited in combat."
-            )
-        updated["demo_mode"] = False
+        settings.DEMO_MODE = update.demo_mode
+        updated["demo_mode"] = settings.DEMO_MODE
 
     if update.risk_pct is not None:
         if not 0.001 <= update.risk_pct <= 0.05:

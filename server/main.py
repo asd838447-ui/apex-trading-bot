@@ -19,6 +19,8 @@ from server.api.routes import router as api_router
 from server.api.ws import ws_endpoint
 from server.tasks.scheduler import start_background_tasks, stop_background_tasks
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 # Setup logging
 logging.basicConfig(
     level=logging.getLevelName(settings.LOG_LEVEL),
@@ -27,9 +29,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class SPAStaticFiles(StaticFiles):
+    """
+    Custom StaticFiles wrapper that catches 404 errors and falls back to index.html
+    for client-side Single Page Application (SPA) routing.
+    """
+    async def get_response(self, path: str, scope) -> FileResponse:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as ex:
+            if ex.status_code == 404:
+                index_file = os.path.join(self.directory, "index.html")
+                if os.path.exists(index_file):
+                    return FileResponse(index_file)
+            raise ex
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup safety checks
+    logger.info("Running system startup validation...")
+    if not settings.DEMO_MODE:
+        jwt_secret = settings.JWT_SECRET_KEY
+        if len(jwt_secret) < 32 or "change-me" in jwt_secret.lower() or "changeme" in jwt_secret.lower():
+            raise ValueError(
+                "CRITICAL SECURITY ERROR: In combat mode (DEMO_MODE=False), "
+                "JWT_SECRET_KEY must be at least 32 characters long and cannot be a default placeholder."
+            )
+        logger.info("  ✓ JWT Secret Key validated successfully for Live Combat mode.")
+    else:
+        logger.info("  ✓ Running in DEMO/Simulation mode (security validation bypassed).")
+
     logger.info("Initializing database...")
     try:
         await init_db()
@@ -57,9 +87,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for local frontend dev server (default port 5173 for Vite)
+# Wire CORS origins
+origins = ["http://localhost:5173", "http://localhost:3000"]
+if settings.CORS_ORIGINS:
+    origins.extend([o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=origins,
     allow_origin_regex="http://localhost(:[0-9]+)?",
     allow_credentials=True,
     allow_methods=["*"],
@@ -91,22 +126,8 @@ client_dist_path = os.path.join(project_root, "client", "dist")
 if os.path.exists(client_dist_path):
     logger.info(f"Serving static frontend files from: {client_dist_path}")
     
-    # Mount assets folder for bundle loads
-    assets_path = os.path.join(client_dist_path, "assets")
-    if os.path.exists(assets_path):
-        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
-
-    # Catch-all route to serve the Single Page Application index.html
-    @app.get("/{fallback_path:path}")
-    async def spa_fallback(fallback_path: str):
-        # Do not hijack API or websocket paths
-        if fallback_path.startswith("api/") or fallback_path == "ws":
-            return None
-            
-        index_file = os.path.join(client_dist_path, "index.html")
-        if os.path.exists(index_file):
-            return FileResponse(index_file)
-        return {"detail": "Frontend assets compiled, but index.html is missing."}
+    # Mount SPA Static Files at / as the very last route definition
+    app.mount("/", SPAStaticFiles(directory=client_dist_path, html=True), name="static")
 else:
     logger.warning(
         f"Frontend build folder not found at: {client_dist_path}\n"

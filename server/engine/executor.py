@@ -129,8 +129,9 @@ class OrderExecutor:
             }
             orders.append(order)
 
-            # Выставляем ордер на бирже (если подключена)
-            if self.exchange:
+            # Выставляем ордер на бирже (если подключена и не в демо-режиме)
+            from server.config import settings
+            if self.exchange and not settings.DEMO_MODE:
                 try:
                     order_id = await self.exchange.place_limit(
                         side=side.lower(),
@@ -146,6 +147,11 @@ class OrderExecutor:
                     order["error"] = str(e)
                     rollback_triggered = True
                     break
+            else:
+                # В демо-режиме ордер сразу считается выставленным
+                order["exchange_id"] = f"demo_ex_{order['id']}"
+                order["status"] = "PLACED"
+                placed_orders.append(order)
 
         # Запуск процедуры отката (rollback) в случае сбоя частичного размещения сетки
         if rollback_triggered:
@@ -240,7 +246,8 @@ class OrderExecutor:
         position["closed_at"] = datetime.now(timezone.utc).isoformat()
 
         # Отменяем незаполненные ордера
-        if self.exchange:
+        from server.config import settings
+        if self.exchange and not settings.DEMO_MODE:
             for order in position.get("orders", []):
                 if order["status"] in ("PENDING", "PLACED"):
                     try:
@@ -302,6 +309,12 @@ class OrderExecutor:
 
     async def _get_current_price(self) -> Optional[float]:
         """Получает текущую цену BTC."""
+        from server.config import settings
+        if settings.DEMO_MODE:
+            # Import market_state here to avoid circular dependencies
+            from server.tasks.state import market_state
+            return market_state.btc_price
+
         if self.exchange:
             try:
                 return await self.exchange.get_price("BTCUSDT")

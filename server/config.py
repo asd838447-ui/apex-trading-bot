@@ -66,10 +66,11 @@ class Settings:
     BINANCE_API_SECRET: str = field(
         default_factory=lambda: _env("BINANCE_API_SECRET")
     )
+    BINANCE_TESTNET: bool = field(
+        default_factory=lambda: _env_bool("BINANCE_TESTNET", True)
+    )
     BINANCE_BASE_URL: str = field(
-        default_factory=lambda: _env(
-            "BINANCE_BASE_URL", "https://fapi.binance.com"
-        )
+        default_factory=lambda: _env("BINANCE_BASE_URL", "")
     )
     BINANCE_WS_URL: str = field(
         default_factory=lambda: _env(
@@ -115,14 +116,18 @@ class Settings:
         default_factory=lambda: _env("LOG_LEVEL", "INFO")
     )
 
-    # ── Derived helpers ─────────────────────────────────────────────────
-    @property
-    def DEMO_MODE(self) -> bool:
-        return False
+    DEMO_MODE: bool = field(
+        default_factory=lambda: _env_bool("DEMO_MODE", True)
+    )
+    CORS_ORIGINS: str = field(
+        default_factory=lambda: _env("CORS_ORIGINS", "")
+    )
 
-    @DEMO_MODE.setter
-    def DEMO_MODE(self, value: bool):
-        pass
+    @property
+    def binance_base_url(self) -> str:
+        if self.BINANCE_BASE_URL:
+            return self.BINANCE_BASE_URL
+        return "https://testnet.binancefuture.com" if self.BINANCE_TESTNET else "https://fapi.binance.com"
 
 
     @property
