@@ -45,6 +45,3 @@ requests==2.31.0
 
 # Utilities
 orjson==3.9.13
-
-# AI & Maintenance
-google-genai>=0.1.0
