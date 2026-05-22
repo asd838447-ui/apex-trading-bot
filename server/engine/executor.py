@@ -129,9 +129,8 @@ class OrderExecutor:
             }
             orders.append(order)
 
-            # Выставляем ордер на бирже (если подключена и не в демо-режиме)
-            from server.config import settings
-            if self.exchange and not settings.DEMO_MODE:
+            # Выставляем ордер на бирже
+            if self.exchange:
                 try:
                     order_id = await self.exchange.place_limit(
                         side=side.lower(),
@@ -148,10 +147,7 @@ class OrderExecutor:
                     rollback_triggered = True
                     break
             else:
-                # В демо-режиме ордер сразу считается выставленным
-                order["exchange_id"] = f"demo_ex_{order['id']}"
-                order["status"] = "PLACED"
-                placed_orders.append(order)
+                raise RuntimeError("Binance Futures Exchange Client is not connected! Cannot place orders in Combat mode.")
 
         # Запуск процедуры отката (rollback) в случае сбоя частичного размещения сетки
         if rollback_triggered:
@@ -246,8 +242,7 @@ class OrderExecutor:
         position["closed_at"] = datetime.now(timezone.utc).isoformat()
 
         # Отменяем незаполненные ордера
-        from server.config import settings
-        if self.exchange and not settings.DEMO_MODE:
+        if self.exchange:
             for order in position.get("orders", []):
                 if order["status"] in ("PENDING", "PLACED"):
                     try:
@@ -256,6 +251,8 @@ class OrderExecutor:
                         )
                     except Exception as e:
                         logger.warning(f"Ошибка отмены ордера: {e}")
+        else:
+            raise RuntimeError("Binance Futures Exchange Client is not connected! Cannot cancel orders in Combat mode.")
 
         logger.info(
             f"Позиция закрыта: {position_id}, PnL={pnl:+.2f} ({pnl_pct:+.1f}%), "
@@ -275,8 +272,7 @@ class OrderExecutor:
             Оценка слиппеджа в USD
         """
         if not self.exchange:
-            # В демо-режиме: примерная оценка 0.01% для малых ордеров
-            return 0.0001 * qty
+            raise RuntimeError("Binance Futures Exchange Client is not connected! Cannot estimate slippage.")
 
         try:
             orderbook = await self.exchange.get_orderbook("BTCUSDT")
@@ -309,12 +305,6 @@ class OrderExecutor:
 
     async def _get_current_price(self) -> Optional[float]:
         """Получает текущую цену BTC."""
-        from server.config import settings
-        if settings.DEMO_MODE:
-            # Import market_state here to avoid circular dependencies
-            from server.tasks.state import market_state
-            return market_state.btc_price
-
         if self.exchange:
             try:
                 return await self.exchange.get_price("BTCUSDT")

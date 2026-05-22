@@ -61,7 +61,6 @@ class LoginResponse(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    demo_mode: Optional[bool] = None
     risk_pct: Optional[float] = None
     confidence_threshold: Optional[float] = None
 
@@ -120,7 +119,7 @@ async def get_status():
 
     return {
         "status": "running",
-        "bot_mode": "demo" if settings.DEMO_MODE else "live",
+        "bot_mode": "live",
         "btc_price": market_state.btc_price,
         "equity_curve": market_state.equity_curve,
         "trade_history": market_state.trades[:20],
@@ -337,10 +336,6 @@ async def update_settings(
 ):
     """Обновление настроек бота (требует admin)."""
     updated = {}
-
-    if update.demo_mode is not None:
-        settings.DEMO_MODE = update.demo_mode
-        updated["demo_mode"] = settings.DEMO_MODE
 
     if update.risk_pct is not None:
         if not 0.001 <= update.risk_pct <= 0.05:

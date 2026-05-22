@@ -91,7 +91,10 @@ class Settings:
     )
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = field(
-        default_factory=lambda: _env_int("JWT_EXPIRE_MINUTES", 1440)
+        default_factory=lambda: _env_int("JWT_EXPIRE_MINUTES", 60)
+    )
+    VAULT_ENCRYPTION_KEY: str = field(
+        default_factory=lambda: _env("VAULT_ENCRYPTION_KEY", "")
     )
 
     # ── Telegram ────────────────────────────────────────────────────────
@@ -114,10 +117,6 @@ class Settings:
     DEBUG: bool = field(default_factory=lambda: _env_bool("DEBUG", False))
     LOG_LEVEL: str = field(
         default_factory=lambda: _env("LOG_LEVEL", "INFO")
-    )
-
-    DEMO_MODE: bool = field(
-        default_factory=lambda: _env_bool("DEMO_MODE", True)
     )
     CORS_ORIGINS: str = field(
         default_factory=lambda: _env("CORS_ORIGINS", "")

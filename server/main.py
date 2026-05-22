@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, ORJSONResponse
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -53,16 +53,22 @@ class SPAStaticFiles(StaticFiles):
 async def lifespan(app: FastAPI):
     # Startup safety checks
     logger.info("Running system startup validation...")
-    if not settings.DEMO_MODE:
-        jwt_secret = settings.JWT_SECRET_KEY
-        if len(jwt_secret) < 32 or "change-me" in jwt_secret.lower() or "changeme" in jwt_secret.lower():
-            raise ValueError(
-                "CRITICAL SECURITY ERROR: In combat mode (DEMO_MODE=False), "
-                "JWT_SECRET_KEY must be at least 32 characters long and cannot be a default placeholder."
-            )
-        logger.info("  ✓ JWT Secret Key validated successfully for Live Combat mode.")
-    else:
-        logger.info("  ✓ Running in DEMO/Simulation mode (security validation bypassed).")
+    
+    jwt_secret = settings.JWT_SECRET_KEY
+    if len(jwt_secret) < 32 or "change-me" in jwt_secret.lower() or "changeme" in jwt_secret.lower():
+        raise ValueError(
+            "CRITICAL SECURITY ERROR: JWT_SECRET_KEY must be at least 32 characters long "
+            "and cannot be a default placeholder."
+        )
+    logger.info("  ✓ JWT Secret Key validated successfully for Live Combat mode.")
+
+    vault_key = settings.VAULT_ENCRYPTION_KEY
+    if not vault_key or len(vault_key) < 16 or "change-me" in vault_key.lower() or "changeme" in vault_key.lower():
+        raise ValueError(
+            "CRITICAL SECURITY ERROR: VAULT_ENCRYPTION_KEY is required, must be at least 16 characters long "
+            "and cannot be a default placeholder."
+        )
+    logger.info("  ✓ Vault Encryption Key validated successfully.")
 
     logger.info("Initializing database...")
     try:
@@ -106,6 +112,7 @@ app = FastAPI(
     title="APEX Trading Bot API",
     description="Backend API Gateway for APEX Algorithmic Trading Bot",
     version="1.0.0",
+    default_response_class=ORJSONResponse,
     lifespan=lifespan,
 )
 

@@ -26,26 +26,26 @@ services:
           property: connectionString
       - key: JWT_SECRET_KEY
         generateValue: true
-      - key: DEMO_MODE
-        value: "true"
       - key: BINANCE_TESTNET
         value: "true"
       - key: CORS_ORIGINS
-        value: ""
+        value: "https://apex-trading-bot-xblr.onrender.com"
       - key: JWT_ALGORITHM
         value: "HS256"
-      - key: JWT_EXPIRATION_MINUTES
-        value: "1440"
+      - key: JWT_EXPIRE_MINUTES
+        value: "60"
+      - key: VAULT_ENCRYPTION_KEY
+        sync: false
       - key: BINANCE_API_KEY
-        value: "demo_binance_key"
+        sync: false
       - key: BINANCE_API_SECRET
-        value: "demo_binance_secret"
+        sync: false
       - key: GLASSNODE_API_KEY
-        value: "demo_glassnode_key"
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
-        value: "demo_telegram_token"
+        sync: false
       - key: TELEGRAM_CHAT_ID
-        value: "demo_telegram_chat_id"
+        sync: false
 
   # Redis for persistent state across restarts (Free Tier)
   - type: redis

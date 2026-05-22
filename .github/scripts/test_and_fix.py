@@ -22,11 +22,17 @@ def run_local_test():
     
     # 1. Запускаем сервер локально, перенаправляя вывод в файл, чтобы избежать deadlock
     log_file = open("server_test.log", "w", encoding="utf-8")
+    
+    env = dict(os.environ)
+    env.setdefault("JWT_SECRET_KEY", "super-secure-local-combat-jwt-secret-key-32-chars")
+    env.setdefault("VAULT_ENCRYPTION_KEY", "super-secure-local-vault-key-32-chars")
+    
     process = subprocess.Popen(
         ["uvicorn", "server.main:app", "--host", "127.0.0.1", "--port", "8000"],
         stdout=log_file,
         stderr=log_file,
-        text=True
+        text=True,
+        env=env
     )
     
     # Запрашиваем эталонную цену BTC/USDT напрямую с Binance FUTURES REST API,

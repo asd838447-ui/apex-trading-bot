@@ -62,15 +62,12 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
 
           <div style={{
             ...styles.statusChip,
-            background: botMode === 'demo'
-              ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-            borderColor: botMode === 'demo'
-              ? 'rgba(245, 158, 11, 0.25)' : 'rgba(239, 68, 68, 0.25)',
-            color: botMode === 'demo' ? 'var(--amber)' : 'var(--rose)',
-            boxShadow: botMode === 'demo'
-              ? '0 0 10px rgba(245, 158, 11, 0.15)' : '0 0 10px rgba(239, 68, 68, 0.15)',
+            background: 'rgba(239, 68, 68, 0.12)',
+            borderColor: 'rgba(239, 68, 68, 0.25)',
+            color: 'var(--rose)',
+            boxShadow: '0 0 10px rgba(239, 68, 68, 0.15)',
           }}>
-            {botMode === 'demo' ? 'DEMO MODE' : 'LIVE COMBAT'}
+            LIVE COMBAT
           </div>
         </div>
       </div>
@@ -79,15 +76,15 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
       <div style={styles.rightSection}>
         <div style={{
           ...styles.liveBadge,
-          background: botMode === 'demo' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(239, 68, 68, 0.08)',
-          borderColor: botMode === 'demo' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-          boxShadow: botMode === 'demo' ? '0 0 10px rgba(245, 158, 11, 0.1)' : '0 0 10px rgba(239, 68, 68, 0.1)',
-        }} title={botMode === 'demo' ? 'Running in Simulated/Demo Mode' : 'Strictly running in Live Combat Mode'}>
-          <Zap size={14} color={botMode === 'demo' ? 'var(--amber)' : 'var(--rose)'} />
+          background: 'rgba(239, 68, 68, 0.08)',
+          borderColor: 'rgba(239, 68, 68, 0.2)',
+          boxShadow: '0 0 10px rgba(239, 68, 68, 0.1)',
+        }} title="Strictly running in Live Combat Mode">
+          <Zap size={14} color="var(--rose)" />
           <span style={{
             ...styles.liveBadgeLabel,
-            color: botMode === 'demo' ? 'var(--amber)' : 'var(--rose)',
-          }}>{botMode === 'demo' ? 'DEMO ACTIVE' : 'COMBAT ACTIVE'}</span>
+            color: 'var(--rose)',
+          }}>COMBAT ACTIVE</span>
         </div>
 
         <div className="divider" />

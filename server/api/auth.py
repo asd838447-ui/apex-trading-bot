@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Настройки JWT
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 часа
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.JWT_EXPIRE_MINUTES
 
 # Security scheme
 security = HTTPBearer(auto_error=False)

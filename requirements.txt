@@ -29,10 +29,6 @@ vaderSentiment==3.3.2
 # Exchange connectors
 websockets==12.0
 aiohttp==3.9.3
-ccxt==4.2.18
-
-# Monitoring
-prometheus-client==0.20.0
 
 # Security
 cryptography==42.0.2

@@ -20,8 +20,8 @@ from server.skills.skill_07_nohuman import TiltGuard
 
 logger = logging.getLogger(__name__)
 
-# Log DEMO_MODE status
-logger.info(f"APEX BOT: Loaded DEMO_MODE={settings.DEMO_MODE}")
+# Running strictly in Combat Mode
+logger.info("APEX BOT: Running strictly in 100% LIVE COMBAT mode.")
 
 
 def parse_klines_to_df(klines: list) -> pd.DataFrame:
@@ -186,17 +186,15 @@ class MarketState:
             self.executor = OrderExecutor(exchange_client=self.exchange, redis_client=redis_client)
             
             # Fetch real balance and set current equity
-            if not settings.DEMO_MODE:
-                try:
-                    real_balance = await self.exchange.get_balance()
-                    if real_balance > 0:
-                        self.current_equity = real_balance
-                        logger.info(f"Loaded real USDT balance from Binance Futures: {real_balance}")
-                except Exception as e:
-                    logger.error(f"Failed to fetch real balance from Binance: {e}")
-            else:
+            try:
+                real_balance = await self.exchange.get_balance()
+                if real_balance > 0:
+                    self.current_equity = real_balance
+                    logger.info(f"Loaded real USDT balance from Binance Futures: {real_balance}")
+            except Exception as e:
+                logger.error(f"Failed to fetch real balance from Binance: {e}")
                 self.current_equity = settings.LIVE_EQUITY
-                logger.info(f"DEMO MODE: Using default simulated equity: {self.current_equity}")
+                logger.info(f"Using default fallback equity: {self.current_equity}")
             
             # 1. Load active position from DB
             try:
@@ -381,7 +379,7 @@ class MarketState:
             take_profit = round(entry_price * 1.015, 2)
             leverage = 5
 
-            if self.exchange and not settings.DEMO_MODE:
+            if self.exchange:
                 try:
                     # Fetch 50 15m candles to calculate dynamic ATR
                     klines = await self.exchange.get_klines("BTCUSDT", "15m", 50)
@@ -428,11 +426,10 @@ class MarketState:
                 }
                 try:
                     # Sync leverage on exchange
-                    if not settings.DEMO_MODE:
-                        try:
-                            await self.exchange.set_leverage(leverage)
-                        except Exception as le:
-                            logger.warning(f"Failed to set leverage on Binance Futures: {le}")
+                    try:
+                        await self.exchange.set_leverage(leverage)
+                    except Exception as le:
+                        logger.warning(f"Failed to set leverage on Binance Futures: {le}")
                     
                     live_pos = await self.executor.open_position(
                         signal=signal_data,
@@ -519,7 +516,7 @@ class MarketState:
         side = pos["side"]
 
         # --- LIVE EXCHANGE EXECUTION ---
-        if self.exchange and not settings.DEMO_MODE:
+        if self.exchange:
             logger.info("Executing LIVE close position and cancelling open grid orders on Binance Futures...")
             try:
                 # Place market order to close
@@ -554,9 +551,7 @@ class MarketState:
         pnl = round(pnl, 2)
         pnl_pct = round((pnl / (entry_price * qty)) * 100, 2)
 
-        if settings.DEMO_MODE:
-            self.current_equity = round(self.current_equity + pnl, 2)
-            logger.info(f"DEMO MODE: Updated simulated equity to {self.current_equity}")
+
 
         # Record to TiltGuard
         if pnl < 0:
@@ -607,7 +602,7 @@ class MarketState:
 
     async def sync_live_position_if_needed(self):
         """Checks actual position risk on Binance Futures and auto-reconciles if closed."""
-        if not self.exchange or not self.current_position or settings.DEMO_MODE:
+        if not self.exchange or not self.current_position:
             return
 
         try:
