@@ -85,6 +85,7 @@ class MarketState:
             # Setup real Binance client and executor in LIVE trading mode
             from server.connectors.exchange_client import BinanceClient
             from server.engine.executor import OrderExecutor
+            from server.skills.skill_07_nohuman import TiltGuard
             
             api_key = settings.BINANCE_API_KEY or ""
             api_secret = settings.BINANCE_API_SECRET or ""
@@ -97,7 +98,23 @@ class MarketState:
                 api_secret=api_secret,
                 testnet=testnet,
             )
-            self.executor = OrderExecutor(exchange_client=self.exchange)
+            
+            # Setup Redis persistence
+            redis_client = None
+            try:
+                import redis
+                logger.info(f"Connecting to Redis at {settings.REDIS_URL}...")
+                r = redis.from_url(settings.REDIS_URL, decode_responses=True, socket_timeout=2)
+                r.ping()
+                redis_client = r
+                logger.info("  ✓ Redis connection established successfully.")
+            except Exception as re_err:
+                logger.warning(f"Redis connection failed: {re_err}. Operating in graceful in-memory fallback mode.")
+            
+            # Instantiating TiltGuard and OrderExecutor with Redis connection
+            if redis_client:
+                self.tilt_guard = TiltGuard(redis_client=redis_client)
+            self.executor = OrderExecutor(exchange_client=self.exchange, redis_client=redis_client)
             
             # Fetch real balance and set current equity
             try:

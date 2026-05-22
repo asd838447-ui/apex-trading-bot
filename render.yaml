@@ -22,10 +22,14 @@ services:
         fromDatabase:
           name: apex-db
           property: connectionString
+      - key: REDIS_URL
+        fromRedis:
+          name: apex-redis
+          property: connectionString
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: DEMO_MODE
-        value: "true"
+        value: "false"
       - key: BINANCE_API_KEY
         value: "demo_binance_key"
       - key: BINANCE_API_SECRET
@@ -36,6 +40,13 @@ services:
         value: "demo_telegram_token"
       - key: TELEGRAM_CHAT_ID
         value: "demo_telegram_chat_id"
+
+  # Redis for persistent state across restarts (Free Tier)
+  - type: redis
+    name: apex-redis
+    region: frankfurt
+    plan: free
+    ipAllowList: []  # only internal access
 
 databases:
   # PostgreSQL for persistent data (Free Tier)

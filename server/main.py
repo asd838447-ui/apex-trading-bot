@@ -76,6 +76,12 @@ async def websocket_route(websocket: WebSocket):
     await ws_endpoint(websocket)
 
 
+@app.get("/health")
+async def root_health_check():
+    """Direct, lightweight health check endpoint for Render blueprint routing."""
+    return {"status": "ok"}
+
+
 # Serve Static Frontend Files (client/dist) in production/Render environment
 # This allows the backend to host the compiled React app on the same port.
 current_dir = os.path.dirname(os.path.abspath(__file__))
