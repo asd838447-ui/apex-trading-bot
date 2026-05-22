@@ -73,7 +73,7 @@ class Settings:
     )
     BINANCE_WS_URL: str = field(
         default_factory=lambda: _env(
-            "BINANCE_WS_URL", "wss://fstream.binance.com/stream"
+            "BINANCE_WS_URL", "wss://fstream.binance.com/market/stream"
         )
     )
 

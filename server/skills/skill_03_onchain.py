@@ -17,7 +17,8 @@ async def fetch_metrics() -> Dict[str, Any]:
     """Fetch latest on-chain metrics from free public APIs."""
     results = {}
     try:
-        async with aiohttp.ClientSession() as s:
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as s:
             # CoinGecko: Fear&Greed proxy + dominance (completely free)
             try:
                 async with s.get('https://api.coingecko.com/api/v3/global', timeout=10) as resp:

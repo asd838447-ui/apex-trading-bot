@@ -97,7 +97,8 @@ async def fetch_crypto_news() -> List[str]:
     headlines: List[str] = []
 
     try:
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
             for url in _NEWS_SOURCES:
                 try:
                     async with session.get(

@@ -19,7 +19,7 @@ STREAMS = [
     "btcusdt@kline_1d",    # Свечи 1D
 ]
 
-BASE_URL = "wss://fstream.binance.com/stream?streams="
+BASE_URL = "wss://fstream.binance.com/market/stream?streams="
 
 
 class BinanceWSConnector:
@@ -68,6 +68,11 @@ class BinanceWSConnector:
             try:
                 # Динамический импорт websockets
                 import websockets
+                import ssl
+
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
 
                 logger.info(f"Подключение к Binance WS: {url[:80]}...")
                 async with websockets.connect(
@@ -75,6 +80,7 @@ class BinanceWSConnector:
                     ping_interval=20,
                     ping_timeout=10,
                     close_timeout=5,
+                    ssl=ssl_context,
                 ) as ws:
                     self.ws = ws
                     self.reconnect_delay = 1  # Сброс задержки при успешном подключении

@@ -60,9 +60,11 @@ class BinanceClient:
     async def _ensure_session(self):
         """Создаёт aiohttp сессию если не создана."""
         if self.session is None or self.session.closed:
+            connector = aiohttp.TCPConnector(ssl=False)
             self.session = aiohttp.ClientSession(
                 headers={"X-MBX-APIKEY": self.api_key},
                 timeout=aiohttp.ClientTimeout(total=10),
+                connector=connector,
             )
             await self.sync_time()
 
