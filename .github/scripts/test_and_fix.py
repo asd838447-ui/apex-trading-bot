@@ -3,7 +3,9 @@ import time
 import requests
 import subprocess
 from google import genai
+
 client = None
+
 def get_ai_client():
     global client
     if client is None:
@@ -16,7 +18,7 @@ def get_ai_client():
 FILE_TO_FIX = "server/main.py"
 
 def run_local_test():
-    print("Запускаем локальный краш-тест бота...")
+    print("[INFO] Запускаем локальный краш-тест бота...")
     
     # 1. Запускаем сервер локально, перенаправляя вывод в файл, чтобы избежать deadlock
     log_file = open("server_test.log", "w", encoding="utf-8")
@@ -27,19 +29,36 @@ def run_local_test():
         text=True
     )
     
-    # Даем серверу 3 секунды на то, чтобы загрузиться
-    time.sleep(3)
-    
-    # 2. ПРОВЕРКА НА КРАШ: Не упал ли сервер сразу?
-    if process.poll() is not None:
+    # Резолвим проблему с таймаутом старта: опрашиваем сервер в течение 10 секунд
+    server_ready = False
+    for attempt in range(1, 11):
+        if process.poll() is not None:
+            log_file.close()
+            with open("server_test.log", "r", encoding="utf-8") as f:
+                logs = f.read()
+            return False, f"КРИТИЧЕСКАЯ ОШИБКА (Crash). Сервер не запустился:\n{logs}"
+            
+        print(f"[INFO] Попытка подключения к серверу {attempt}/10...")
+        try:
+            # Делаем быстрый GET-запрос к корню сервера
+            response = requests.get("http://127.0.0.1:8000/", timeout=2)
+            if response.status_code == 200:
+                server_ready = True
+                break
+        except requests.exceptions.RequestException:
+            pass
+        time.sleep(1)
+        
+    if not server_ready:
+        process.kill()
         log_file.close()
         with open("server_test.log", "r", encoding="utf-8") as f:
             logs = f.read()
-        return False, f"КРИТИЧЕСКАЯ ОШИБКА (Crash). Сервер не запустился:\n{logs}"
+        return False, f"СЕТЕВАЯ ОШИБКА. Сервер не ответил за 10 секунд.\n\nLogs:\n{logs}"
 
     # 3. ПРОВЕРКА ДАННЫХ: Делаем запрос к нашему запущенному боту
     try:
-        print("Сервер работает. Проверяем выдачу реальных данных...")
+        print("[INFO] Сервер работает. Проверяем выдачу реальных данных...")
         response = requests.get("http://127.0.0.1:8000/", timeout=5)
         
         if response.status_code == 200:
@@ -53,7 +72,7 @@ def run_local_test():
                     logs = f.read()
                 return False, f"ЛОГИЧЕСКАЯ ОШИБКА. Сервер отдал 200 OK, но данные кривые:\n{data[:500]}\n\nLogs:\n{logs}"
             
-            print("✅ Данные валидны! Деплой разрешен.")
+            print("[SUCCESS] Данные валидны! Деплой разрешен.")
             process.kill()
             log_file.close()
             return True, ""
@@ -73,7 +92,7 @@ def run_local_test():
         return False, f"СЕТЕВАЯ ОШИБКА. Сервер висит, но не отвечает на запросы:\n{str(e)}\n\nLogs:\n{logs}"
 
 def ask_ai_to_fix(error_log):
-    print("❌ Найдена проблема! Отправляем лог ошибки в ИИ...")
+    print("[FAIL] Найдена проблема! Отправляем лог ошибки в ИИ...")
     with open(FILE_TO_FIX, "r", encoding="utf-8") as f:
         content = f.read()
         
@@ -107,7 +126,7 @@ def ask_ai_to_fix(error_log):
          
     with open(FILE_TO_FIX, "w", encoding="utf-8") as f:
         f.write(new_code)
-    print("✅ Код переписан нейросетью. Подготавливаем коммит.")
+    print("[SUCCESS] Код переписан нейросетью. Подготавливаем коммит.")
 
 success, error_reason = run_local_test()
 
