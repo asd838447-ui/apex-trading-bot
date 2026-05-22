@@ -93,16 +93,38 @@ async def ws_data_collector():
     Collects real-time price updates and verifies TP/SL boundaries for active positions.
     """
     try:
+        import time
         from server.connectors.binance_ws import BinanceWSConnector
         from server.api.ws import manager
 
         connector = BinanceWSConnector()
+        last_broadcast_time = 0.0
+        broadcast_interval = 0.200  # 200ms throttling
 
         async def on_tick(tick):
+            nonlocal last_broadcast_time
             price = tick["price"]
             # Update live price and monitor if active position crossed TP/SL
             closed_trade = await market_state.update_price(price)
             
+            # Broadcast fast price updates to clients with throttling
+            now = time.time()
+            if now - last_broadcast_time >= broadcast_interval:
+                last_broadcast_time = now
+                try:
+                    await manager.broadcast({
+                        "type": "price_update",
+                        "data": {
+                            "symbol": "BTCUSDT",
+                            "price": round(price, 2),
+                            "change_24h": round(market_state.price_change_24h, 2),
+                            "volume_24h": round(market_state.volume_24h, 0),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                    })
+                except Exception as e:
+                    logger.debug(f"Failed to broadcast fast price: {e}")
+
             # If position was closed, broadcast the updates immediately to all connected UIs
             if closed_trade:
                 logger.info(f"Position closed by market action: {closed_trade['reason']} at {price}")

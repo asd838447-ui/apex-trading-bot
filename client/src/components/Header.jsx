@@ -1,13 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Activity, Wifi, WifiOff, Zap, Clock, ToggleLeft, ToggleRight } from 'lucide-react';
 
 export default function Header({ btcPrice, isConnected, systemStatus, botMode, onToggleMode }) {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [priceColor, setPriceColor] = useState('var(--text)');
+  const prevPriceRef = useRef(btcPrice);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (btcPrice > 0) {
+      if (btcPrice > prevPriceRef.current) {
+        setPriceColor('var(--emerald)');
+        const t = setTimeout(() => setPriceColor('var(--text-primary)'), 500);
+        return () => clearTimeout(t);
+      } else if (btcPrice < prevPriceRef.current) {
+        setPriceColor('var(--rose)');
+        const t = setTimeout(() => setPriceColor('var(--text-primary)'), 500);
+        return () => clearTimeout(t);
+      }
+      prevPriceRef.current = btcPrice;
+    }
+  }, [btcPrice]);
 
   const formatTime = (d) =>
     d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -15,7 +32,7 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
   const formatDate = (d) =>
     d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-  const priceFormatted = typeof btcPrice === 'number'
+  const priceFormatted = typeof btcPrice === 'number' && btcPrice > 0
     ? btcPrice.toLocaleString('en-US', {
         style: 'currency',
         currency: 'USD',
@@ -42,7 +59,7 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
       <div style={styles.centerSection}>
         <div style={styles.priceBlock}>
           <span style={styles.priceLabel}>BTC/USDT</span>
-          <span className="mono" style={styles.priceValue}>{priceFormatted}</span>
+          <span className="mono" style={{ ...styles.priceValue, color: priceColor, transition: 'color 0.15s ease' }}>{priceFormatted}</span>
         </div>
 
         <div className="divider" />

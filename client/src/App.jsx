@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import useWebSocket from './hooks/useWebSocket';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
@@ -60,13 +60,131 @@ export default function App() {
 
   const { isConnected, lastMessage, sendMessage } = useWebSocket(wsUrl);
 
+  const lastDirectTickTimeRef = useRef(0);
+
+  // Direct real-time high-frequency Multi-Source WebSocket price feed (Zero lag with automatic fallbacks)
+  useEffect(() => {
+    let ws = null;
+    let reconnectTimer = null;
+    let watchdogTimer = null;
+    let currentSourceIdx = 0;
+
+    const sources = [
+      {
+        name: 'Binance Futures WS',
+        url: 'wss://fstream.binance.com/ws/btcusdt@aggTrade',
+        parse: (data) => data && data.p ? parseFloat(data.p) : null
+      },
+      {
+        name: 'Binance Spot WS',
+        url: 'wss://stream.binance.com:9443/ws/btcusdt@aggTrade',
+        parse: (data) => data && data.p ? parseFloat(data.p) : null
+      },
+      {
+        name: 'Bybit Spot WS',
+        url: 'wss://stream.bybit.com/v5/public/spot',
+        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT'] },
+        parse: (data) => {
+          if (data && data.topic === 'publicTrade.BTCUSDT' && data.data && data.data[0]) {
+            return parseFloat(data.data[0].p);
+          }
+          return null;
+        }
+      }
+    ];
+
+    const connectPriceWS = () => {
+      const source = sources[currentSourceIdx];
+
+      try {
+        ws = new WebSocket(source.url);
+
+        const resetWatchdog = () => {
+          if (watchdogTimer) clearTimeout(watchdogTimer);
+          watchdogTimer = setTimeout(() => {
+            moveToNextSource();
+          }, 6000);
+        };
+
+        ws.onopen = () => {
+          resetWatchdog();
+          if (source.subscribe) {
+            ws.send(JSON.stringify(source.subscribe));
+          }
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const rawData = JSON.parse(event.data);
+            const price = source.parse(rawData);
+            if (price && !isNaN(price)) {
+              setBtcPrice(price);
+              lastDirectTickTimeRef.current = Date.now();
+              resetWatchdog();
+            }
+          } catch (err) {
+            // Silence parser errors
+          }
+        };
+
+        ws.onclose = () => {
+          cleanupTimers();
+          reconnectTimer = setTimeout(() => {
+            moveToNextSource();
+          }, 2000);
+        };
+
+        ws.onerror = () => {
+          if (ws) ws.close();
+        };
+
+      } catch (err) {
+        cleanupTimers();
+        reconnectTimer = setTimeout(() => {
+          moveToNextSource();
+        }, 2000);
+      }
+    };
+
+    const moveToNextSource = () => {
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
+      cleanupTimers();
+      currentSourceIdx = (currentSourceIdx + 1) % sources.length;
+      connectPriceWS();
+    };
+
+    const cleanupTimers = () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+    };
+
+    connectPriceWS();
+
+    return () => {
+      cleanupTimers();
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
+    };
+  }, []);
+
   // Handle incoming WS messages
   useEffect(() => {
     if (!lastMessage) return;
     const { type, data } = lastMessage;
     switch (type) {
       case 'price_update':
-        setBtcPrice(data.price);
+        // Use backend price update as a fallback if direct stream is lagging or inactive
+        setBtcPrice((prev) => {
+          if (Date.now() - lastDirectTickTimeRef.current > 3000 || prev === 0.0) {
+            return data.price;
+          }
+          return prev;
+        });
         break;
       case 'equity_update':
         setEquityCurve((prev) => {
