@@ -18,7 +18,7 @@ def get_ai_client():
 FILE_TO_FIX = "server/main.py"
 
 def run_local_test():
-    print("[INFO] Запускаем локальный краш-тест бота...")
+    print("[INFO] Запускаем локальный краш-тест бота с глубокой сверкой цен...")
     
     # 1. Запускаем сервер локально, перенаправляя вывод в файл, чтобы избежать deadlock
     log_file = open("server_test.log", "w", encoding="utf-8")
@@ -29,22 +29,41 @@ def run_local_test():
         text=True
     )
     
-    # Резолвим проблему с таймаутом старта: опрашиваем сервер в течение 10 секунд
+    # Сначала запрашиваем актуальную биржевую цену BTC/USDT напрямую с Binance REST API для сопоставления
+    public_price = None
+    try:
+        print("[INFO] Запрашиваем эталонную биржевую цену BTCUSDT с Binance API...")
+        public_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
+        if public_res.status_code == 200:
+            public_price = float(public_res.json()["price"])
+            print(f"[INFO] Эталонная цена Binance: ${public_price:.2f}")
+        else:
+            print(f"[WARNING] Binance API ответил с кодом {public_res.status_code}")
+    except Exception as pe:
+        print(f"[WARNING] Не удалось получить эталонную цену с Binance API: {pe}")
+
+    # Резолвим проблему с таймаутом старта: опрашиваем сервер в течение 15 секунд,
+    # давая HMM классификатору обучиться, а WebSocket - подключиться и обновить цену.
     server_ready = False
-    for attempt in range(1, 11):
+    bot_price = 93250.0
+    for attempt in range(1, 16):
         if process.poll() is not None:
             log_file.close()
             with open("server_test.log", "r", encoding="utf-8") as f:
                 logs = f.read()
             return False, f"КРИТИЧЕСКАЯ ОШИБКА (Crash). Сервер не запустился:\n{logs}"
             
-        print(f"[INFO] Попытка подключения к серверу {attempt}/10...")
+        print(f"[INFO] Попытка подключения к серверу и проверки котировок {attempt}/15...")
         try:
-            # Делаем быстрый GET-запрос к корню сервера
-            response = requests.get("http://127.0.0.1:8000/", timeout=2)
+            # Делаем GET-запрос к эндпоинту статуса бота
+            response = requests.get("http://127.0.0.1:8000/api/status", timeout=2)
             if response.status_code == 200:
-                server_ready = True
-                break
+                data_json = response.json()
+                bot_price = float(data_json.get("btc_price", 0))
+                # Если цена изменилась с дефолтных 93250.00, значит WebSocket успешно поставляет реальные тики
+                if bot_price != 93250.0:
+                    server_ready = True
+                    break
         except requests.exceptions.RequestException:
             pass
         time.sleep(1)
@@ -54,25 +73,32 @@ def run_local_test():
         log_file.close()
         with open("server_test.log", "r", encoding="utf-8") as f:
             logs = f.read()
-        return False, f"СЕТЕВАЯ ОШИБКА. Сервер не ответил за 10 секунд.\n\nLogs:\n{logs}"
+        
+        # Если сервер ответил, но цена осталась статичной/дефолтной
+        if bot_price == 93250.0:
+            return False, f"ЛОГИЧЕСКАЯ ОШИБКА. Сервер успешно запущен, но WebSocket-коллектор не обновил цену! Цена осталась дефолтной: ${bot_price:.2f}. Logs:\n{logs}"
+        return False, f"СЕТЕВАЯ ОШИБКА. Сервер не ответил или WebSocket не заработал за 15 секунд.\n\nLogs:\n{logs}"
 
-    # 3. ПРОВЕРКА ДАННЫХ: Делаем запрос к нашему запущенному боту
+    # 3. СВЕРКА ДАННЫХ: Сопоставляем цену в боте с реальной биржевой
     try:
-        print("[INFO] Сервер работает. Проверяем выдачу реальных данных...")
-        response = requests.get("http://127.0.0.1:8000/", timeout=5)
+        print("[INFO] Сервер успешно поставляет котировки. Производим детальную сверку...")
+        response = requests.get("http://127.0.0.1:8000/api/status", timeout=5)
         
         if response.status_code == 200:
-            data = response.text
+            data_json = response.json()
+            bot_price = float(data_json.get("btc_price", 0))
             
-            # ЩЕПЕТИЛЬНАЯ ПРОВЕРКА: Ищем признаки кривых данных
-            if "error" in data.lower() or "traceback" in data.lower() or data.strip() == "":
-                process.kill()
-                log_file.close()
-                with open("server_test.log", "r", encoding="utf-8") as f:
-                    logs = f.read()
-                return False, f"ЛОГИЧЕСКАЯ ОШИБКА. Сервер отдал 200 OK, но данные кривые:\n{data[:500]}\n\nLogs:\n{logs}"
+            # Сопоставляем с реальной биржевой ценой с допустимым отклонением в 2%
+            if public_price:
+                diff_pct = (abs(bot_price - public_price) / public_price) * 100
+                print(f"[INFO] Сверка: Цена бота = ${bot_price:.2f}, Биржевая цена = ${public_price:.2f}, Отклонение = {diff_pct:.4f}%")
+                
+                if diff_pct > 2.0:
+                    process.kill()
+                    log_file.close()
+                    return False, f"ЛОГИЧЕСКАЯ ОШИБКА. Обнаружено расхождение цен! Цена в боте (${bot_price:.2f}) отличается от реальной биржевой цены (${public_price:.2f}) более чем на 2% (отклонение: {diff_pct:.2f}%). WebSocket поставляет некорректные или устаревшие данные."
             
-            print("[SUCCESS] Данные валидны! Деплой разрешен.")
+            print("[SUCCESS] Все проверки пройдены! Котировки бота полностью соответствуют реальному рынку. Деплой разрешен.")
             process.kill()
             log_file.close()
             return True, ""
@@ -106,7 +132,7 @@ def ask_ai_to_fix(error_log):
     {content}
     
     ЗАДАЧА:
-    1. Изучи ошибку. Если это краш — исправь синтаксис/импорты. Если это логическая ошибка — исправь алгоритм расчета или формирования JSON/ответа.
+    1. Изучи ошибку. Если это краш — исправь синтаксис/импорты. Если это логическая ошибка или расхождение с биржей — исправь алгоритм расчета, WebSocket-коннекторы или формирование ответа.
     2. Верни ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ код от первой до последней строчки.
     3. Без разметки, без тегов и без комментариев.
     """
