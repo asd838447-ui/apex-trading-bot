@@ -99,7 +99,7 @@ async def ws_data_collector():
 
         connector = BinanceWSConnector()
         last_broadcast_time = 0.0
-        broadcast_interval = 0.200  # 200ms throttling
+        broadcast_interval = 0.100  # 100ms throttling
 
         async def on_tick(tick):
             nonlocal last_broadcast_time

@@ -61,6 +61,22 @@ export default function App() {
   // Ref to hold tick counter for frequency measurement
   const tickCounterRef = useRef(0);
 
+  const latestPriceRef = useRef(0.0);
+  const latestSourceRef = useRef('Local Server');
+
+  // Throttled UI updater for high-frequency price data (100ms interval / 10Hz) to prevent browser main-thread choking
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (latestPriceRef.current !== 0.0) {
+        setBtcPrice(latestPriceRef.current);
+      }
+      if (latestSourceRef.current !== '') {
+        setLastActiveSource(latestSourceRef.current);
+      }
+    }, 100);
+    return () => clearInterval(timer);
+  }, []);
+
   // WebSocket
   const wsUrl = useMemo(() => {
     if (typeof window !== 'undefined') {
@@ -151,8 +167,8 @@ export default function App() {
             const rawData = JSON.parse(event.data);
             const price = source.parse(rawData);
             if (price && !isNaN(price)) {
-              setBtcPrice(price);
-              setLastActiveSource(source.name);
+              latestPriceRef.current = price;
+              latestSourceRef.current = source.name;
               tickCounterRef.current += 1;
               lastDirectTickTimeRef.current = Date.now();
             }
@@ -218,13 +234,10 @@ export default function App() {
     switch (type) {
       case 'price_update':
         // Use backend price update as a fallback if direct streams are lagging or inactive
-        setBtcPrice((prev) => {
-          if (Date.now() - lastDirectTickTimeRef.current > 3000 || prev === 0.0) {
-            setLastActiveSource('Local Server');
-            return data.price;
-          }
-          return prev;
-        });
+        if (Date.now() - lastDirectTickTimeRef.current > 3000 || latestPriceRef.current === 0.0) {
+          latestPriceRef.current = data.price;
+          latestSourceRef.current = 'Local Server';
+        }
         break;
       case 'equity_update':
         setEquityCurve((prev) => {
@@ -272,7 +285,10 @@ export default function App() {
           if (data.signals) setSignals(data.signals);
           if (data.risk) setRisk(data.risk);
           if (data.regime) setRegime(data.regime);
-          if (data.btc_price) setBtcPrice(data.btc_price);
+          if (data.btc_price) {
+            setBtcPrice(data.btc_price);
+            latestPriceRef.current = data.btc_price;
+          }
           if (data.bot_mode) setBotMode(data.bot_mode);
           if (data.status) setSystemStatus(data.status);
         }

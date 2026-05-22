@@ -200,21 +200,7 @@ async def _send_periodic_updates(websocket: WebSocket):
         await market_state.initialize_if_needed()
         
         while True:
-            # 1. Отправка реальной цены (каждые 2 секунды)
-            await manager.send_personal(websocket, {
-                "type": "price_update",
-                "data": {
-                    "symbol": "BTCUSDT",
-                    "price": round(market_state.btc_price, 2),
-                    "change_24h": round(market_state.price_change_24h, 2),
-                    "volume_24h": round(market_state.volume_24h, 0),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                },
-            })
-
-            await asyncio.sleep(2)
-
-            # 2. Обновление сигналов (каждые 8 секунд)
+            # 1. Обновление сигналов (каждые 8 секунд)
             if int(time.time()) % 8 < 2:
                 default_signals = {
                     "skills": [],
@@ -228,7 +214,7 @@ async def _send_periodic_updates(websocket: WebSocket):
                     "data": signals,
                 })
 
-            # 3. Обновление режима рынка (каждые 15 секунд)
+            # 2. Обновление режима рынка (каждые 15 секунд)
             if int(time.time()) % 15 < 2:
                 await manager.send_personal(websocket, {
                     "type": "regime_update",
@@ -239,7 +225,7 @@ async def _send_periodic_updates(websocket: WebSocket):
                     },
                 })
 
-            # 4. Обновление параметров риска (каждые 12 секунд)
+            # 3. Обновление параметров риска (каждые 12 секунд)
             if int(time.time()) % 12 < 2:
                 risk_data = market_state.get_risk_metrics()
                 await manager.send_personal(websocket, {
@@ -247,7 +233,7 @@ async def _send_periodic_updates(websocket: WebSocket):
                     "data": risk_data,
                 })
 
-            # 5. Обновление equity (каждые 20 секунд)
+            # 4. Обновление equity (каждые 20 секунд)
             if int(time.time()) % 20 < 2:
                 daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in market_state.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
                 await manager.send_personal(websocket, {
@@ -260,6 +246,8 @@ async def _send_periodic_updates(websocket: WebSocket):
                         "drawdown": "0.00",
                     },
                 })
+
+            await asyncio.sleep(2)
 
     except asyncio.CancelledError:
         pass
