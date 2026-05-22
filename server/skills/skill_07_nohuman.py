@@ -87,6 +87,7 @@ class TiltGuard:
 
     def is_locked(self) -> bool:
         """Return True if the bot is currently locked out."""
+        self._reset_day_if_needed()
         if self._locked_until <= 0:
             return False
         if time.time() >= self._locked_until:
@@ -105,6 +106,7 @@ class TiltGuard:
 
     @property
     def status(self) -> dict:
+        self._reset_day_if_needed()
         return {
             "locked": self.is_locked(),
             "consecutive_losses": self._consecutive_losses,
@@ -167,3 +169,4 @@ class TiltGuard:
         if today != self._day_marker:
             self._daily_stops = 0
             self._day_marker = today
+            self._save_state()

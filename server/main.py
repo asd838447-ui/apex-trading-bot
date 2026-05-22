@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
         await init_db()
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        # Proceed anyway in demo mode or if fallback DB handles it
+        # Proceed anyway if fallback DB handles it
 
     logger.info("Starting background tasks...")
     await start_background_tasks(app)
@@ -60,7 +60,7 @@ app = FastAPI(
 # CORS middleware for local frontend dev server (default port 5173 for Vite)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex="http://localhost(:[0-9]+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

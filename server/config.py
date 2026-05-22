@@ -1,12 +1,16 @@
 """
 APEX Trading Bot – Configuration
-Loads settings from environment variables with sensible demo-mode defaults.
+Loads settings from environment variables with sensible production/combat defaults.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+
+from dotenv import load_dotenv
+load_dotenv()
+
 
 
 def _env(key: str, default: str = "") -> str:
@@ -43,7 +47,7 @@ class Settings:
     # ── Database ────────────────────────────────────────────────────────
     DATABASE_URL: str = field(
         default_factory=lambda: (
-            _env("DATABASE_URL", "sqlite+aiosqlite:///./apex_demo.db")
+            _env("DATABASE_URL", "sqlite+aiosqlite:///./apex_combat.db")
             .replace("postgres://", "postgresql+asyncpg://")
             .replace("postgresql://", "postgresql+asyncpg://")
             .replace("postgresql+asyncpg+asyncpg://", "postgresql+asyncpg://")
@@ -81,7 +85,7 @@ class Settings:
     # ── JWT / Auth ──────────────────────────────────────────────────────
     JWT_SECRET_KEY: str = field(
         default_factory=lambda: _env(
-            "JWT_SECRET_KEY", "apex-demo-secret-change-me"
+            "JWT_SECRET_KEY", "apex-combat-secret-change-me"
         )
     )
     JWT_ALGORITHM: str = "HS256"
@@ -101,8 +105,8 @@ class Settings:
     SYMBOL: str = field(
         default_factory=lambda: _env("SYMBOL", "BTCUSDT")
     )
-    DEMO_EQUITY: float = field(
-        default_factory=lambda: _env_float("DEMO_EQUITY", 10_000.0)
+    LIVE_EQUITY: float = field(
+        default_factory=lambda: _env_float("LIVE_EQUITY", 10_000.0)
     )
 
     # ── App ─────────────────────────────────────────────────────────────
@@ -112,15 +116,20 @@ class Settings:
     )
 
     # ── Derived helpers ─────────────────────────────────────────────────
-    DEMO_MODE: bool = field(
-        default_factory=lambda: _env_bool("DEMO_MODE", not _env("BINANCE_API_KEY") or not _env("BINANCE_API_SECRET"))
-    )
+    @property
+    def DEMO_MODE(self) -> bool:
+        return False
+
+    @DEMO_MODE.setter
+    def DEMO_MODE(self, value: bool):
+        pass
+
 
     @property
     def has_glassnode(self) -> bool:
         if not self.GLASSNODE_API_KEY:
             return False
-        if "demo" in self.GLASSNODE_API_KEY.lower() or "placeholder" in self.GLASSNODE_API_KEY.lower():
+        if "dummy" in self.GLASSNODE_API_KEY.lower() or "demo" in self.GLASSNODE_API_KEY.lower() or "placeholder" in self.GLASSNODE_API_KEY.lower():
             return False
         return True
 

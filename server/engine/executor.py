@@ -82,31 +82,47 @@ class OrderExecutor:
         # Расчёт слиппеджа
         slippage = await self.estimate_slippage(qty)
 
-        # Формируем сетку из 3 лимитных ордеров
-        price_step = 0.0003  # 0.03% между уровнями
-        if side == "BUY":
-            prices = [
-                current_price * (1 - price_step * i) for i in range(3)
-            ]
-            stop_price = current_price - stop_dist
-            target_price = current_price + target_dist
-        else:
-            prices = [
-                current_price * (1 + price_step * i) for i in range(3)
-            ]
-            stop_price = current_price + stop_dist
-            target_price = current_price - target_dist
+        # Define the price step between grid orders (0.1%)
+        price_step = 0.001
 
-        # Дробление: 40%, 35%, 25%
-        order_splits = [0.40, 0.35, 0.25]
+        # Determine if we should split based on Binance minimum limits
+        if qty < 0.004:
+            prices = [current_price]
+            order_splits = [1.0]
+            logger.info("Position size is small (qty < 0.004 BTC). Skipping grid splitting to avoid LOT_SIZE inflation.")
+            if side == "BUY":
+                stop_price = current_price - stop_dist
+                target_price = current_price + target_dist
+            else:
+                stop_price = current_price + stop_dist
+                target_price = current_price - target_dist
+        else:
+            order_splits = [0.40, 0.35, 0.25]
+            if side == "BUY":
+                prices = [current_price * (1 - price_step * i) for i in range(3)]
+                stop_price = current_price - stop_dist
+                target_price = current_price + target_dist
+            else:
+                prices = [current_price * (1 + price_step * i) for i in range(3)]
+                stop_price = current_price + stop_dist
+                target_price = current_price - target_dist
 
         orders = []
+        placed_orders = []
+        rollback_triggered = False
+
         for i, (price, split) in enumerate(zip(prices, order_splits)):
+            # Enforce Binance minimum lot size (0.001 BTC) and format to 3 decimal places
+            if split == 1.0:
+                sub_qty = max(0.001, round(qty, 3))
+            else:
+                sub_qty = max(0.001, round(qty * split, 3))
+            
             order = {
                 "id": f"apex_{int(time.time())}_{i}",
                 "side": side,
                 "price": round(price, 2),
-                "qty": round(qty * split, 6),
+                "qty": sub_qty,
                 "type": "LIMIT",
                 "status": "PENDING",
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -119,14 +135,30 @@ class OrderExecutor:
                     order_id = await self.exchange.place_limit(
                         side=side.lower(),
                         price=price,
-                        qty=qty * split,
+                        qty=sub_qty,
                     )
                     order["exchange_id"] = order_id
                     order["status"] = "PLACED"
+                    placed_orders.append(order)
                 except Exception as e:
-                    logger.error(f"Ошибка выставления ордера: {e}")
+                    logger.error(f"Ошибка выставления ордера {order['id']}: {e}")
                     order["status"] = "ERROR"
                     order["error"] = str(e)
+                    rollback_triggered = True
+                    break
+
+        # Запуск процедуры отката (rollback) в случае сбоя частичного размещения сетки
+        if rollback_triggered:
+            logger.warning("Запуск процедуры отката (rollback) для частично выставленной сетки...")
+            for p_order in placed_orders:
+                exchange_id = p_order.get("exchange_id")
+                if exchange_id:
+                    try:
+                        logger.info(f"Отмена ранее выставленного субордера: {exchange_id}")
+                        await self.exchange.cancel_order(exchange_id)
+                    except Exception as cancel_err:
+                        logger.error(f"Не удалось отменить субордер {exchange_id} при откате: {cancel_err}")
+            return None
 
         # Сохраняем в Redis (если подключён)
         if self.redis:
@@ -275,9 +307,9 @@ class OrderExecutor:
                 return await self.exchange.get_price("BTCUSDT")
             except Exception as e:
                 logger.warning(f"Ошибка получения цены: {e}")
+                return None
 
-        # Демо-режим: возвращаем фиксированную цену
-        return 69500.0
+        raise RuntimeError("Binance Futures Exchange Client is not connected! Cannot operate in Combat mode.")
 
     def get_active_positions(self) -> list[dict]:
         """Возвращает список активных позиций."""

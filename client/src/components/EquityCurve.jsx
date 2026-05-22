@@ -14,10 +14,12 @@ const RANGES = [
 
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload || !payload.length) return null;
+  const val = payload[0]?.value;
+  if (val == null || isNaN(Number(val))) return null;
   return (
     <div className="custom-tooltip">
       <div className="label">{label}</div>
-      <div className="value">${payload[0].value.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+      <div className="value">${Number(val).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
     </div>
   );
 }
@@ -31,8 +33,10 @@ export default function EquityCurve({ data }) {
     return data.slice(-range.days);
   }, [data, selectedRange]);
 
-  const currentEquity = filtered.length ? filtered[filtered.length - 1].equity : 0;
-  const startEquity = filtered.length ? filtered[0].equity : 0;
+  const rawCurrent = filtered.length ? filtered[filtered.length - 1].equity : 0;
+  const rawStart = filtered.length ? filtered[0].equity : 0;
+  const currentEquity = typeof rawCurrent === 'number' && !isNaN(rawCurrent) ? rawCurrent : 0;
+  const startEquity = typeof rawStart === 'number' && !isNaN(rawStart) ? rawStart : 0;
   const pnl = currentEquity - startEquity;
   const pnlPct = startEquity ? ((pnl / startEquity) * 100) : 0;
   const isPositive = pnl >= 0;
@@ -62,7 +66,7 @@ export default function EquityCurve({ data }) {
         <div>
           <span style={styles.statLabel}>Current Equity</span>
           <span className="mono" style={styles.statValue}>
-            ${currentEquity.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            ${(typeof currentEquity === 'number' && !isNaN(currentEquity)) ? currentEquity.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}
           </span>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -82,7 +86,7 @@ export default function EquityCurve({ data }) {
             >
               {isPositive ? '+' : ''}{pnlPct.toFixed(2)}%
               <span style={styles.pnlDollar}>
-                ({isPositive ? '+' : ''}${Math.abs(pnl).toLocaleString('en-US', { minimumFractionDigits: 2 })})
+                ({isPositive ? '+' : ''}${(typeof pnl === 'number' && !isNaN(pnl)) ? Math.abs(pnl).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'})
               </span>
             </span>
           </div>

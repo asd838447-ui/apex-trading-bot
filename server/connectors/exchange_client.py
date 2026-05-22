@@ -36,6 +36,26 @@ class BinanceClient:
         self.base_url = FUTURES_TESTNET_URL if testnet else FUTURES_BASE_URL
         self.session: Optional[aiohttp.ClientSession] = None
         self.recv_window = 5000
+        self.time_offset = 0
+        self.time_synced = False
+
+    async def sync_time(self):
+        """Синхронизирует время с сервером Binance Futures для компенсации дрифта часов."""
+        if self.session is None or self.session.closed:
+            return
+        try:
+            url = f"{self.base_url}/fapi/v1/time"
+            async with self.session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    server_time = data.get("serverTime")
+                    if server_time:
+                        local_time = int(time.time() * 1000)
+                        self.time_offset = server_time - local_time
+                        self.time_synced = True
+                        logger.info(f"Binance Futures time synced. Local drift offset: {self.time_offset}ms")
+        except Exception as e:
+            logger.warning(f"Failed to synchronize time with Binance Futures: {e}")
 
     async def _ensure_session(self):
         """Создаёт aiohttp сессию если не создана."""
@@ -44,10 +64,11 @@ class BinanceClient:
                 headers={"X-MBX-APIKEY": self.api_key},
                 timeout=aiohttp.ClientTimeout(total=10),
             )
+            await self.sync_time()
 
     def _sign(self, params: dict) -> dict:
         """Добавляет timestamp и HMAC SHA256 подпись к параметрам."""
-        params["timestamp"] = int(time.time() * 1000)
+        params["timestamp"] = int(time.time() * 1000) + self.time_offset
         params["recvWindow"] = self.recv_window
         query_string = urlencode(params)
         signature = hmac.new(
@@ -218,10 +239,18 @@ class BinanceClient:
         )
         if isinstance(data, list) and data:
             pos = data[0]
+            position_amt = float(pos.get("positionAmt", 0))
+            if position_amt > 0:
+                side = "LONG"
+            elif position_amt < 0:
+                side = "SHORT"
+            else:
+                side = "NONE"
+
             return {
                 "symbol": pos.get("symbol"),
-                "side": "LONG" if float(pos.get("positionAmt", 0)) > 0 else "SHORT",
-                "size": abs(float(pos.get("positionAmt", 0))),
+                "side": side,
+                "size": abs(position_amt),
                 "entry_price": float(pos.get("entryPrice", 0)),
                 "unrealized_pnl": float(pos.get("unRealizedProfit", 0)),
                 "leverage": int(pos.get("leverage", 1)),

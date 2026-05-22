@@ -34,8 +34,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return hash_password(plain_password) == hashed_password
 
 
-# Демо-пользователь (в продакшне — из БД)
-DEMO_USER = {
+# Администратор (в продакшне — из БД)
+ADMIN_USER = {
     "username": "admin",
     "hashed_password": hash_password("apex2024"),
     "role": "admin",
@@ -83,12 +83,12 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
     """
     Аутентификация пользователя.
     """
-    # Демо-режим: один пользователь admin/apex2024
-    if username == DEMO_USER["username"]:
-        if verify_password(password, DEMO_USER["hashed_password"]):
+    # Администратор: admin/apex2024
+    if username == ADMIN_USER["username"]:
+        if verify_password(password, ADMIN_USER["hashed_password"]):
             return {
-                "username": DEMO_USER["username"],
-                "role": DEMO_USER["role"],
+                "username": ADMIN_USER["username"],
+                "role": ADMIN_USER["role"],
             }
     return None
 
@@ -99,9 +99,6 @@ async def get_current_user(
     """
     FastAPI dependency для получения текущего пользователя из JWT.
     """
-    # В демо-режиме разрешаем доступ без токена
-    if settings.DEMO_MODE and credentials is None:
-        return {"username": "demo", "role": "viewer"}
 
     if credentials is None:
         raise HTTPException(

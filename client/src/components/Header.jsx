@@ -62,27 +62,22 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
 
           <div style={{
             ...styles.statusChip,
-            background: botMode === 'live'
-              ? 'rgba(239, 68, 68, 0.12)' : 'rgba(0, 212, 255, 0.12)',
-            borderColor: botMode === 'live'
-              ? 'rgba(239, 68, 68, 0.25)' : 'rgba(0, 212, 255, 0.25)',
-            color: botMode === 'live' ? 'var(--rose)' : 'var(--cyan)',
+            background: 'rgba(239, 68, 68, 0.12)',
+            borderColor: 'rgba(239, 68, 68, 0.25)',
+            color: 'var(--rose)',
+            boxShadow: '0 0 10px rgba(239, 68, 68, 0.15)',
           }}>
-            {botMode === 'live' ? 'LIVE' : 'PAPER'}
+            LIVE COMBAT
           </div>
         </div>
       </div>
 
-      {/* Right: Connection + Mode Toggle + Clock */}
+      {/* Right: Connection + Clock */}
       <div style={styles.rightSection}>
-        <button style={styles.modeToggle} onClick={onToggleMode} title="Toggle Demo/Live mode">
-          {botMode === 'paper' ? (
-            <ToggleLeft size={22} color="var(--cyan)" />
-          ) : (
-            <ToggleRight size={22} color="var(--rose)" />
-          )}
-          <span style={styles.modeLabel}>{botMode === 'paper' ? 'Demo' : 'Live'}</span>
-        </button>
+        <div style={styles.liveBadge} title="Strictly running in Live Combat Mode">
+          <Zap size={14} color="var(--rose)" />
+          <span style={styles.liveBadgeLabel}>COMBAT ACTIVE</span>
+        </div>
 
         <div className="divider" />
 
@@ -96,7 +91,7 @@ export default function Header({ btcPrice, isConnected, systemStatus, botMode, o
             fontSize: 'var(--text-xs)',
             color: isConnected ? 'var(--emerald)' : 'var(--text-dim)',
           }}>
-            {isConnected ? 'Live' : 'Demo'}
+            {isConnected ? 'Online' : 'Offline'}
           </span>
         </div>
 
@@ -207,21 +202,21 @@ const styles = {
     gap: '14px',
     minWidth: 'fit-content',
   },
-  modeToggle: {
+  liveBadge: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '4px',
+    background: 'rgba(239, 68, 68, 0.08)',
+    border: '1px solid rgba(239, 68, 68, 0.2)',
+    padding: '4px 10px',
     borderRadius: 'var(--radius-sm)',
-    transition: 'background var(--transition-fast)',
+    boxShadow: '0 0 10px rgba(239, 68, 68, 0.1)',
   },
-  modeLabel: {
+  liveBadgeLabel: {
     fontSize: 'var(--text-xs)',
-    fontWeight: 600,
-    color: 'var(--text-secondary)',
+    fontWeight: 700,
+    color: 'var(--rose)',
+    letterSpacing: '0.04em',
   },
   connectionStatus: {
     display: 'flex',

@@ -51,8 +51,8 @@ export default function TradeHistory({ trades }) {
     { key: 'time', label: 'Time' },
     { key: 'symbol', label: 'Symbol' },
     { key: 'side', label: 'Side' },
-    { key: 'entry', label: 'Entry' },
-    { key: 'exit', label: 'Exit' },
+    { key: 'entry_price', label: 'Entry' },
+    { key: 'exit_price', label: 'Exit' },
     { key: 'pnl', label: 'PnL' },
     { key: 'rr', label: 'R:R' },
     { key: 'status', label: 'Status' },
@@ -101,33 +101,31 @@ export default function TradeHistory({ trades }) {
                     {trade.side}
                   </span>
                 </td>
-                <td>{trade.entry_price != null ? `$${trade.entry_price.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}</td>
+                <td>{(() => { const ep = Number(trade.entry_price); return !isNaN(ep) ? `$${ep.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'; })()}</td>
                 <td>
-                  {trade.exit_price != null
-                    ? `$${trade.exit_price?.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
-                    : '—'}
+                  {(() => { const xp = Number(trade.exit_price); return !isNaN(xp) ? `$${xp.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'; })()}
                 </td>
                 <td>
-                  {trade.pnl != null ? (
+                  {(() => { const pnlVal = Number(trade.pnl); const pnlPctVal = Number(trade.pnl_pct); return !isNaN(pnlVal) ? (
                     <span style={{
-                      color: trade.pnl >= 0 ? 'var(--emerald)' : 'var(--rose)',
+                      color: pnlVal >= 0 ? 'var(--emerald)' : 'var(--rose)',
                       fontWeight: 600,
                     }}>
-                      {trade.pnl >= 0 ? '+' : ''}${trade.pnl?.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      {pnlVal >= 0 ? '+' : ''}${pnlVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       <span style={{ opacity: 0.6, fontSize: '10px', marginLeft: '4px' }}>
-                        ({trade.pnl_pct >= 0 ? '+' : ''}{trade.pnl_pct}%)
+                        ({!isNaN(pnlPctVal) ? (pnlPctVal >= 0 ? '+' : '') + pnlPctVal : '—'}%)
                       </span>
                     </span>
-                  ) : '—'}
+                  ) : '—'; })()}
                 </td>
                 <td>
-                  {trade.rr != null ? (
+                  {(() => { const rrVal = Number(trade.rr); return !isNaN(rrVal) ? (
                     <span style={{
-                      color: trade.rr >= 1 ? 'var(--emerald)' : 'var(--amber)',
+                      color: rrVal >= 1 ? 'var(--emerald)' : 'var(--amber)',
                     }}>
-                      {trade.rr?.toFixed(2)}
+                      {rrVal.toFixed(2)}
                     </span>
-                  ) : '—'}
+                  ) : '—'; })()}
                 </td>
                 <td>
                   <span className={`badge badge-${(trade.status || 'OPEN').toLowerCase()}`}>

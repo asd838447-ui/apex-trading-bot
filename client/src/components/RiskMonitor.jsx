@@ -90,13 +90,13 @@ export default function RiskMonitor({ risk, btcPrice }) {
         />
         <RiskMetric
           label="Stop Loss"
-          value={typeof stopLoss === 'number' ? `$${stopLoss.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : '—'}
+          value={(() => { const slVal = Number(stopLoss); return !isNaN(slVal) ? `$${slVal.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : '—'; })()}
           color="var(--rose)"
           icon={ArrowDown}
         />
         <RiskMetric
           label="Take Profit"
-          value={typeof takeProfit === 'number' ? `$${takeProfit.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : '—'}
+          value={(() => { const tpVal = Number(takeProfit); return !isNaN(tpVal) ? `$${tpVal.toLocaleString('en-US', { minimumFractionDigits: 0 })}` : '—'; })()}
           color="var(--emerald)"
           icon={Target}
         />
@@ -111,7 +111,7 @@ export default function RiskMonitor({ risk, btcPrice }) {
             fontWeight: 700,
             color: (dailyPnl || 0) >= 0 ? 'var(--emerald)' : 'var(--rose)',
           }}>
-            {typeof dailyPnl === 'number' ? `${dailyPnl >= 0 ? '+' : ''}$${dailyPnl.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'}
+            {(() => { const dpVal = Number(dailyPnl); return !isNaN(dpVal) ? `${dpVal >= 0 ? '+' : ''}$${dpVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'; })()}
           </span>
         </div>
         <div style={styles.dailyPnlBar}>

@@ -14,14 +14,34 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import select
 from server.db.database import session_scope
 from server.db.models import Trade
+import pandas as pd
+from server.config import settings
+from server.skills.skill_07_nohuman import TiltGuard
+
+# Force application to run in Live (Combat) Trading Mode strictly
+settings.DEMO_MODE = False
 
 logger = logging.getLogger(__name__)
+
+
+def parse_klines_to_df(klines: list) -> pd.DataFrame:
+    """Преобразует список свечей Binance в типизированный DataFrame."""
+    if not klines:
+        return pd.DataFrame()
+    df = pd.DataFrame(klines, columns=[
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "qav", "num_trades", "taker_base", "taker_quote", "ignore"
+    ])
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = df[col].astype(float)
+    return df
+
 
 
 class MarketState:
     """
     Centralized store for live prices, trade histories, and equity curves.
-    Synced with SQLite/Postgres to persist paper-trading progress.
+    Synced with SQLite/Postgres to persist real-time trading progress.
     """
 
     def __init__(self):
@@ -38,11 +58,21 @@ class MarketState:
         self.signals: Dict[str, Any] = {}
         self.regime: str = "TREND"
         self.regime_confidence: float = 85.0
+        self.regime_history: List[Dict[str, Any]] = []
+        self.current_atr: float = 1200.0
         
         self.initial_equity: float = 10000.0
         self.current_equity: float = 10000.0
         self.initialized: bool = False
+        self._daily_passive_returns: Dict[str, float] = {}
         self._lock = asyncio.Lock()
+        
+        # Exchange and Executor attributes for live mode
+        self.exchange = None
+        self.executor = None
+        
+        # Risk protection skill
+        self.tilt_guard = TiltGuard()
 
     async def initialize_if_needed(self):
         """Loads historical trades from DB or seeds realistic ones if empty."""
@@ -50,7 +80,33 @@ class MarketState:
             if self.initialized:
                 return
 
-            logger.info("Initializing MarketState...")
+            logger.info("Initializing MarketState in Combat (Live) Mode...")
+
+            # Setup real Binance client and executor in LIVE trading mode
+            from server.connectors.exchange_client import BinanceClient
+            from server.engine.executor import OrderExecutor
+            
+            api_key = settings.BINANCE_API_KEY or ""
+            api_secret = settings.BINANCE_API_SECRET or ""
+            if not api_key or not api_secret:
+                logger.warning("WARNING: API keys are empty! Live trading requires BINANCE_API_KEY and BINANCE_API_SECRET in configuration.")
+            
+            testnet = "testnet" in settings.BINANCE_BASE_URL.lower()
+            self.exchange = BinanceClient(
+                api_key=api_key,
+                api_secret=api_secret,
+                testnet=testnet,
+            )
+            self.executor = OrderExecutor(exchange_client=self.exchange)
+            
+            # Fetch real balance and set current equity
+            try:
+                real_balance = await self.exchange.get_balance()
+                if real_balance > 0:
+                    self.current_equity = real_balance
+                    logger.info(f"Loaded real USDT balance from Binance Futures: {real_balance}")
+            except Exception as e:
+                logger.error(f"Failed to fetch real balance from Binance: {e}")
             
             # 1. Load active position from DB
             try:
@@ -105,106 +161,50 @@ class MarketState:
                         "qty": t.qty,
                         "pnl": t.pnl or 0.0,
                         "pnl_pct": round(pnl_pct, 2),
-                        "rr": round(abs(pnl_pct) / 1.0, 1) if pnl_pct != 0 else 1.0,
+                        "rr": round(pnl_pct / 1.0, 2) if pnl_pct != 0 else 0.0,
                         "status": "CLOSED",
                         "reason": "TAKE_PROFIT" if pnl_pct > 0 else "STOP_LOSS"
                     })
                 logger.info("Loaded %d trades from database.", len(self.trades))
             else:
-                # Seed realistic trading history
-                await self._seed_demo_history()
+                logger.info("No trade history in database. Starting with clean state.")
+                self.trades = []
 
             # 4. Generate/Load Equity Curve
             self._generate_equity_curve()
             self.initialized = True
 
-    async def _seed_demo_history(self):
-        """Seeds 15 realistic historical trades into the DB and memory."""
-        logger.info("Seeding realistic trade history...")
-        now = datetime.now(timezone.utc)
-        base = self.btc_price
-        
-        async with session_scope() as session:
-            for i in range(15):
-                side = random.choice(["LONG", "SHORT"])
-                pnl_pct = random.uniform(0.6, 2.8) * (1 if random.random() > 0.4 else -1)
-                
-                # Make trades appear sequential in time
-                trade_time = now - timedelta(hours=(15 - i) * 8 + random.randint(0, 180))
-                
-                entry = base - (15 - i) * random.uniform(150, 450)
-                exit_price = entry * (1 + pnl_pct / 100.0) if side == "LONG" else entry * (1 - pnl_pct / 100.0)
-                qty = round(random.uniform(0.04, 0.18), 4)
-                pnl = round(entry * qty * (pnl_pct / 100.0), 2)
-
-                db_trade = Trade(
-                    time=trade_time,
-                    symbol="BTCUSDT",
-                    side=side,
-                    entry_price=round(entry, 2),
-                    exit_price=round(exit_price, 2),
-                    qty=qty,
-                    pnl=pnl,
-                    status="CLOSED"
-                )
-                session.add(db_trade)
-            
-            # Flush so we get primary keys
-            await session.commit()
-            
-            # Reload to sync memory
-            stmt = select(Trade).filter(Trade.status == "CLOSED").order_by(Trade.time.desc()).limit(30)
-            res = await session.execute(stmt)
-            db_trades = res.scalars().all()
-            
-            self.trades = []
-            for t in db_trades:
-                pnl_pct = t.pnl / (t.entry_price * t.qty) * 100 if t.pnl and t.qty else 0.0
-                self.trades.append({
-                    "id": f"trade_{t.id:04d}",
-                    "time": t.time.isoformat(),
-                    "symbol": t.symbol,
-                    "side": t.side,
-                    "entry_price": t.entry_price,
-                    "exit_price": t.exit_price or t.entry_price,
-                    "qty": t.qty,
-                    "pnl": t.pnl or 0.0,
-                    "pnl_pct": round(pnl_pct, 2),
-                    "rr": round(abs(pnl_pct) / 1.0, 1) if pnl_pct != 0 else 1.0,
-                    "status": "CLOSED",
-                    "reason": "TAKE_PROFIT" if pnl_pct > 0 else "STOP_LOSS"
-                })
-
     def _generate_equity_curve(self):
-        """Generates realistic equity curve based on trades and growth."""
-        equity = self.initial_equity
-        now = datetime.now(timezone.utc)
+        """Generates real equity curve based on actual closed trades."""
         self.equity_curve = []
+        now = datetime.now(timezone.utc)
         
-        # Calculate backward based on current trade list
+        # Calculate daily pnl from real closed trades
         daily_returns = {}
         for t in reversed(self.trades):
             dt = t["time"][:10]  # yyyy-mm-dd
-            daily_returns[dt] = daily_returns.get(dt, 0.0) + t["pnl"]
+            daily_returns[dt] = daily_returns.get(dt, 0.0) + (t.get("pnl", 0.0) or 0.0)
             
-        for i in range(90, 0, -1):
+        # Build backwards from current equity
+        temp_curve = []
+        for i in range(90):
             date = now - timedelta(days=i)
             dt_str = date.strftime("%Y-%m-%d")
+            temp_curve.append(dt_str)
             
+        curve_data = []
+        current_val = self.current_equity
+        for dt_str in reversed(temp_curve):
             trade_pnl = daily_returns.get(dt_str, 0.0)
-            passive_return = random.gauss(15.0, 45.0)  # simple daily variance
-            daily_pnl = trade_pnl + passive_return
-            
-            equity += daily_pnl
-            equity = max(equity, 5000.0)
-            
-            self.equity_curve.append({
+            curve_data.append({
                 "date": dt_str,
-                "equity": round(equity, 2),
-                "daily_pnl": round(daily_pnl, 2),
-                "daily_pct": round((daily_pnl / (equity - daily_pnl)) * 100, 2) if (equity - daily_pnl) != 0 else 0.0
+                "equity": round(current_val, 2),
+                "daily_pnl": round(trade_pnl, 2),
+                "daily_pct": round((trade_pnl / (current_val - trade_pnl)) * 100, 2) if (current_val - trade_pnl) != 0 else 0.0
             })
-        self.current_equity = round(equity, 2)
+            current_val -= trade_pnl
+            
+        self.equity_curve = list(reversed(curve_data))
 
     async def update_price(self, price: float) -> Optional[Dict[str, Any]]:
         """
@@ -213,40 +213,107 @@ class MarketState:
         """
         self.btc_price = price
         
-        if not self.current_position:
-            return None
+        async with self._lock:
+            if not self.current_position:
+                return None
 
-        pos = self.current_position
-        side = pos["side"]
-        tp = pos["take_profit"]
-        sl = pos["stop_loss"]
+            pos = self.current_position
+            side = pos["side"]
+            tp = pos["take_profit"]
+            sl = pos["stop_loss"]
 
-        hit_tp = (side == "LONG" and price >= tp) or (side == "SHORT" and price <= tp)
-        hit_sl = (side == "LONG" and price <= sl) or (side == "SHORT" and price >= sl)
+            hit_tp = (side == "LONG" and price >= tp) or (side == "SHORT" and price <= tp)
+            hit_sl = (side == "LONG" and price <= sl) or (side == "SHORT" and price >= sl)
 
-        if hit_tp or hit_sl:
-            reason = "TAKE_PROFIT" if hit_tp else "STOP_LOSS"
-            return await self.close_position(reason)
+            if hit_tp or hit_sl:
+                reason = "TAKE_PROFIT" if hit_tp else "STOP_LOSS"
+                return await self._close_position_internal(reason)
         
         return None
 
     async def open_position(self, side: str, confidence: float) -> Optional[Dict[str, Any]]:
-        """Opens a persistent paper trading position at the current live price."""
+        """Opens a persistent live combat trading position at the current live price."""
+        if self.tilt_guard.is_locked():
+            logger.warning("TiltGuard: Bot is currently locked out! Aborting open_position.")
+            return None
+
         async with self._lock:
             if self.current_position:
                 return None
 
             entry_price = self.btc_price
-            qty = round(random.uniform(0.05, 0.20), 4)
-            leverage = 5
             
-            # SL = 1.0%, TP = 1.5% - realistic swings
-            if side == "LONG":
-                stop_loss = round(entry_price * 0.99, 2)
-                take_profit = round(entry_price * 1.015, 2)
-            else:
-                stop_loss = round(entry_price * 1.01, 2)
-                take_profit = round(entry_price * 0.985, 2)
+            # --- DYNAMIC ATR & KELLY POSITION SIZING ---
+            qty = 0.05  # fallback
+            stop_loss = round(entry_price * 0.99, 2)
+            take_profit = round(entry_price * 1.015, 2)
+            leverage = 5
+
+            if self.exchange:
+                try:
+                    # Fetch 50 15m candles to calculate dynamic ATR
+                    klines = await self.exchange.get_klines("BTCUSDT", "15m", 50)
+                    df = parse_klines_to_df(klines)
+                    
+                    from server.skills.skill_05_risk import compute_atr, position_size
+                    atr = compute_atr(df)
+                    
+                    # Compute dynamic position metrics based on actual wallet equity
+                    risk_metrics = position_size(
+                        equity=self.current_equity,
+                        atr=atr,
+                        price=entry_price
+                    )
+                    qty = risk_metrics["qty"]
+                    leverage = int(risk_metrics["leverage"])
+                    
+                    stop_dist = risk_metrics["stop"]
+                    target_dist = risk_metrics["target"]
+                    
+                    if side == "LONG":
+                        stop_loss = round(entry_price - stop_dist, 2)
+                        take_profit = round(entry_price + target_dist, 2)
+                    else:
+                        stop_loss = round(entry_price + stop_dist, 2)
+                        take_profit = round(entry_price - target_dist, 2)
+                        
+                    logger.info(f"Dynamic sizing computed: qty={qty}, leverage={leverage}, SL={stop_loss}, TP={take_profit}")
+                except Exception as re:
+                    logger.error(f"Failed to calculate dynamic risk size: {re}. Using fallback parameters.")
+
+            # --- LIVE EXCHANGE ORDER GRID EXECUTION ---
+            live_pos = None
+            if self.executor:
+                logger.info("Executing LIVE trade order grid on Binance Futures...")
+                signal_data = {"action": side, "confidence": confidence}
+                stop_dist = abs(entry_price - stop_loss)
+                target_dist = abs(entry_price - take_profit)
+                risk_data = {
+                    "qty": qty,
+                    "stop": stop_dist,
+                    "target": target_dist,
+                    "leverage": leverage
+                }
+                try:
+                    # Sync leverage on exchange
+                    try:
+                        await self.exchange.set_leverage(leverage)
+                    except Exception as le:
+                        logger.warning(f"Failed to set leverage on Binance Futures: {le}")
+                    
+                    live_pos = await self.executor.open_position(
+                        signal=signal_data,
+                        risk=risk_data,
+                        equity=self.current_equity,
+                        prev_equity=self.initial_equity,
+                        tilt_locked=self.tilt_guard.is_locked()
+                    )
+                    if live_pos is None:
+                        logger.error("Executor returned None. Aborting opening position.")
+                        return None
+                except Exception as e:
+                    logger.error(f"Failed to place live order grid: {e}")
+                    return None
 
             try:
                 async with session_scope() as session:
@@ -254,28 +321,46 @@ class MarketState:
                         time=datetime.now(timezone.utc),
                         symbol="BTCUSDT",
                         side=side,
-                        entry_price=entry_price,
+                        entry_price=entry_price if not live_pos else live_pos["entry_price"],
                         qty=qty,
                         status="OPEN"
                     )
                     session.add(db_trade)
                     await session.commit()
                     
-                    self.current_position = {
-                        "id": f"pos_{db_trade.id}",
-                        "db_id": db_trade.id,
-                        "symbol": "BTCUSDT",
-                        "side": side,
-                        "entry_price": entry_price,
-                        "stop_loss": stop_loss,
-                        "take_profit": take_profit,
-                        "qty": qty,
-                        "leverage": leverage,
-                        "opened_at": db_trade.time.isoformat(),
-                        "time": db_trade.time.isoformat(),
-                        "status": "OPEN"
-                    }
-                    logger.info("Opened simulated position: %s", self.current_position)
+                    if not live_pos:
+                        self.current_position = {
+                            "id": f"pos_{db_trade.id}",
+                            "db_id": db_trade.id,
+                            "symbol": "BTCUSDT",
+                            "side": side,
+                            "entry_price": entry_price,
+                            "stop_loss": stop_loss,
+                            "take_profit": take_profit,
+                            "qty": qty,
+                            "leverage": leverage,
+                            "opened_at": db_trade.time.isoformat(),
+                            "time": db_trade.time.isoformat(),
+                            "status": "OPEN"
+                        }
+                    else:
+                        self.current_position = {
+                            "id": f"pos_{db_trade.id}",
+                            "db_id": db_trade.id,
+                            "symbol": "BTCUSDT",
+                            "side": side,
+                            "entry_price": live_pos["entry_price"],
+                            "stop_loss": live_pos["stop_loss"],
+                            "take_profit": live_pos["take_profit"],
+                            "qty": live_pos["qty"],
+                            "leverage": leverage,
+                            "opened_at": live_pos["opened_at"],
+                            "time": live_pos["opened_at"],
+                            "status": "OPEN",
+                            "orders": live_pos["orders"]
+                        }
+                    
+                    logger.info("Position tracking initialized: %s", self.current_position)
                     return self.current_position
             except Exception as e:
                 logger.error("Failed to open position in DB: %s", e)
@@ -283,6 +368,11 @@ class MarketState:
 
     async def close_position(self, reason: str) -> Optional[Dict[str, Any]]:
         """Closes the current position, calculates PnL, saves to DB and returns the closed trade."""
+        async with self._lock:
+            return await self._close_position_internal(reason)
+
+    async def _close_position_internal(self, reason: str) -> Optional[Dict[str, Any]]:
+        """Internal close logic — caller MUST hold self._lock."""
         if not self.current_position:
             return None
 
@@ -295,6 +385,34 @@ class MarketState:
         qty = pos["qty"]
         side = pos["side"]
 
+        # --- LIVE EXCHANGE EXECUTION ---
+        if self.exchange:
+            logger.info("Executing LIVE close position and cancelling open grid orders on Binance Futures...")
+            try:
+                # Place market order to close
+                close_side = "SELL" if side == "LONG" else "BUY"
+                await self.exchange.place_market(side=close_side, qty=qty)
+                
+                # Cancel remaining grid orders
+                await self.exchange.cancel_all_orders("BTCUSDT")
+                
+                # Query actual balance and exit price
+                try:
+                    real_balance = await self.exchange.get_balance()
+                    if real_balance > 0:
+                        self.current_equity = real_balance
+                except Exception as be:
+                    logger.warning(f"Failed to fetch updated balance after trade close: {be}")
+                
+                try:
+                    ticker_price = await self.exchange.get_price("BTCUSDT")
+                    if ticker_price > 0:
+                        exit_price = ticker_price
+                except Exception as pe:
+                    logger.warning(f"Failed to fetch tick price after trade close: {pe}")
+            except Exception as e:
+                logger.error(f"Failed to execute live close: {e}")
+
         if side == "LONG":
             pnl = (exit_price - entry_price) * qty
         else:
@@ -302,6 +420,12 @@ class MarketState:
 
         pnl = round(pnl, 2)
         pnl_pct = round((pnl / (entry_price * qty)) * 100, 2)
+
+        # Record to TiltGuard
+        if pnl < 0:
+            self.tilt_guard.record_loss()
+        else:
+            self.tilt_guard.record_win()
 
         try:
             async with session_scope() as session:
@@ -312,12 +436,12 @@ class MarketState:
                     db_trade.status = "CLOSED"
                     db_trade.exit_price = exit_price
                     db_trade.pnl = pnl
-                    db_trade.time = datetime.now(timezone.utc)
                     await session.commit()
 
                     closed_trade = {
                         "id": f"trade_{db_trade.id:04d}",
                         "time": db_trade.time.isoformat(),
+                        "closed_at": datetime.now(timezone.utc).isoformat(),
                         "symbol": "BTCUSDT",
                         "side": side,
                         "entry_price": entry_price,
@@ -325,7 +449,7 @@ class MarketState:
                         "qty": qty,
                         "pnl": pnl,
                         "pnl_pct": pnl_pct,
-                        "rr": round(abs(pnl_pct) / 1.0, 1),
+                        "rr": round(pnl_pct / 1.0, 2) if pnl_pct != 0 else 0.0,
                         "status": "CLOSED",
                         "reason": reason
                     }
@@ -344,8 +468,56 @@ class MarketState:
             
         return None
 
+    async def sync_live_position_if_needed(self):
+        """Checks actual position risk on Binance Futures and auto-reconciles if closed."""
+        if not self.exchange or not self.current_position:
+            return
+
+        try:
+            live_pos = await self.exchange.get_position("BTCUSDT")
+            # If position was closed on Binance or size is 0, close it locally
+            if not live_pos or live_pos.get("size", 0.0) == 0.0:
+                logger.warning("LIVE SYNC: Detected position was closed on Binance Futures. Reconciling local state...")
+                async with self._lock:
+                    if self.current_position:
+                        await self._close_position_internal("EXCHANGE_SYNC")
+        except Exception as e:
+            logger.error(f"LIVE SYNC: Failed to synchronize position with Binance Futures: {e}")
+
+    async def reinitialize_live_state(self):
+        """Allows hot-swapping connectors dynamically on settings updates."""
+        async with self._lock:
+            self.initialized = False
+            # Close existing session
+            if self.exchange:
+                try:
+                    await self.exchange.close()
+                except Exception as ce:
+                    logger.warning(f"Error closing exchange session during re-init: {ce}")
+                self.exchange = None
+                self.executor = None
+        await self.initialize_if_needed()
+
     def get_risk_metrics(self) -> Dict[str, Any]:
         """Formats risk metrics for dashboard sync."""
+        daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in self.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
+        
+        # Calculate max drawdown on our equity curve if any
+        max_drawdown = 3.0  # default/fallback
+        if self.equity_curve and len(self.equity_curve) > 1:
+            equities = [eq["equity"] for eq in self.equity_curve]
+            max_eq = equities[0]
+            max_dd = 0.0
+            for eq in equities:
+                if eq > max_eq:
+                    max_eq = eq
+                dd = (max_eq - eq) / max_eq if max_eq > 0 else 0.0
+                if dd > max_dd:
+                    max_dd = dd
+            max_drawdown = round(max_dd * 100, 2)
+            
+        tilt_status = self.tilt_guard.status
+        
         if self.current_position:
             pos = self.current_position
             return {
@@ -353,11 +525,16 @@ class MarketState:
                 "leverage": pos["leverage"],
                 "stopLoss": pos["stop_loss"],
                 "takeProfit": pos["take_profit"],
-                "dailyPnl": round(sum(t["pnl"] for t in self.trades if t["time"][:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2),
-                "maxDrawdown": 3.75,
+                "dailyPnl": daily_pnl,
+                "maxDrawdown": max_drawdown,
                 "riskPerTrade": 1.0,
-                "tiltGuard": {"active": False, "cooldownSec": 0},
-                "lossStreak": sum(1 for t in self.trades[:3] if t["pnl"] < 0)
+                "tiltGuard": {
+                    "active": tilt_status["locked"],
+                    "cooldownSec": int(tilt_status["remaining_lock_sec"]),
+                    "consecutiveLosses": tilt_status["consecutive_losses"],
+                    "dailyStops": tilt_status["daily_stops"]
+                },
+                "lossStreak": tilt_status["consecutive_losses"]
             }
         else:
             # When no position, prospective TP/SL limits based on current price
@@ -366,11 +543,16 @@ class MarketState:
                 "leverage": 5,
                 "stopLoss": round(self.btc_price * 0.99, 2),
                 "takeProfit": round(self.btc_price * 1.015, 2),
-                "dailyPnl": round(sum(t["pnl"] for t in self.trades if t["time"][:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2),
-                "maxDrawdown": 3.75,
+                "dailyPnl": daily_pnl,
+                "maxDrawdown": max_drawdown,
                 "riskPerTrade": 1.0,
-                "tiltGuard": {"active": False, "cooldownSec": 0},
-                "lossStreak": sum(1 for t in self.trades[:3] if t["pnl"] < 0)
+                "tiltGuard": {
+                    "active": tilt_status["locked"],
+                    "cooldownSec": int(tilt_status["remaining_lock_sec"]),
+                    "consecutiveLosses": tilt_status["consecutive_losses"],
+                    "dailyStops": tilt_status["daily_stops"]
+                },
+                "lossStreak": tilt_status["consecutive_losses"]
             }
 
 

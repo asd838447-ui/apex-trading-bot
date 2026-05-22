@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 # Стримы для BTC/USDT Futures
 STREAMS = [
     "btcusdt@aggTrade",    # Тиковые сделки (для CVD)
-    "btcusdt@depth20@100ms",  # Стакан 20 уровней
     "btcusdt@kline_15m",   # Свечи 15M
     "btcusdt@kline_4h",    # Свечи 4H
     "btcusdt@kline_1d",    # Свечи 1D

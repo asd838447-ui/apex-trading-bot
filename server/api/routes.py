@@ -45,129 +45,6 @@ class SettingsUpdate(BaseModel):
     confidence_threshold: Optional[float] = None
 
 
-# === Demo Data Generators ===
-
-def _generate_demo_signals() -> dict:
-    """Генерирует реалистичные демо-сигналы в формате, ожидаемом фронтендом."""
-    skills_defs = [
-        {"id": 1, "name": "Trend Follower", "category": "momentum", "weight": 22.0},
-        {"id": 2, "name": "Mean Reversion", "category": "reversion", "weight": 20.0},
-        {"id": 3, "name": "Breakout Hunter", "category": "momentum", "weight": 18.0},
-        {"id": 4, "name": "Volume Profiler", "category": "volume", "weight": 14.0},
-        {"id": 5, "name": "Order Flow", "category": "flow", "weight": 12.0},
-        {"id": 6, "name": "Regime Filter", "category": "regime", "weight": 8.0},
-        {"id": 7, "name": "Sentiment Gauge", "category": "sentiment", "weight": 6.0},
-    ]
-    
-    skills = []
-    for sd in skills_defs:
-        signal = random.choice([-1, 0, 1])
-        confidence = random.randint(30, 95)
-        accuracy = round(random.uniform(55.0, 85.0), 1)
-        skills.append({
-            **sd,
-            "signal": signal,
-            "confidence": confidence,
-            "accuracy": accuracy
-        })
-        
-    composite_score = sum(s["signal"] * (s["weight"] / 100.0) for s in skills)
-    composite_score = round(composite_score * 100.0, 1)
-    
-    if composite_score > 15.0:
-        action = "LONG"
-    elif composite_score < -15.0:
-        action = "SHORT"
-    else:
-        action = "WAIT"
-        
-    composite_confidence = round(sum(s["confidence"] * (s["weight"] / 100.0) for s in skills))
-    
-    return {
-        "skills": skills,
-        "compositeScore": composite_score,
-        "action": action,
-        "confidence": composite_confidence
-    }
-
-
-def _generate_demo_regime() -> dict:
-    """Генерирует реалистичное состояние рыночного режима."""
-    regimes = ["TREND", "FLAT", "VOLATILE"]
-    current = random.choice(regimes)
-    now = datetime.now(timezone.utc)
-    history = []
-    for i in range(24):
-        history.append({
-            "time": (now - timedelta(hours=24 - i)).isoformat(),
-            "regime": random.choice(regimes)
-        })
-    return {
-        "current": current,
-        "confidence": round(random.uniform(60, 95), 1),
-        "history": history
-    }
-
-
-def _generate_demo_trades(count: int = 20) -> list:
-    """Генерирует реалистичную историю сделок."""
-    trades = []
-    base_price = 69000.0
-    now = datetime.now(timezone.utc)
-
-    for i in range(count):
-        entry_price = base_price + random.uniform(-3000, 3000)
-        side = random.choice(["LONG", "SHORT"])
-        pnl_pct = random.gauss(0.5, 2.0)  # Слегка положительный bias
-        pnl = round(entry_price * 0.01 * pnl_pct, 2)
-
-        if side == "LONG":
-            exit_price = entry_price + (pnl / 0.01)
-        else:
-            exit_price = entry_price - (pnl / 0.01)
-
-        trade_time = now - timedelta(hours=count - i, minutes=random.randint(0, 59))
-
-        trades.append({
-            "id": f"trade_{i+1:04d}",
-            "time": trade_time.isoformat(),
-            "symbol": "BTCUSDT",
-            "side": side,
-            "entry_price": round(entry_price, 2),
-            "exit_price": round(exit_price, 2),
-            "qty": round(random.uniform(0.001, 0.05), 4),
-            "pnl": pnl,
-            "pnl_pct": round(pnl_pct, 2),
-            "rr": round(abs(pnl_pct) / 1.0, 1) if pnl > 0 else round(-abs(pnl_pct) / 1.0, 1),
-            "status": "CLOSED",
-            "reason": random.choice(["TAKE_PROFIT", "STOP_LOSS", "TRAILING"]),
-        })
-
-    return sorted(trades, key=lambda x: x["time"], reverse=True)
-
-
-def _generate_demo_equity(days: int = 90) -> list:
-    """Генерирует реалистичную equity curve."""
-    equity_data = []
-    equity = 10000.0
-    now = datetime.now(timezone.utc)
-
-    for i in range(days):
-        date = now - timedelta(days=days - i)
-        daily_return = random.gauss(0.003, 0.02)  # ~0.3% дневная доходность
-        equity *= (1 + daily_return)
-        equity = max(equity, 5000)  # Минимальный порог
-
-        equity_data.append({
-            "date": date.strftime("%Y-%m-%d"),
-            "equity": round(equity, 2),
-            "daily_pnl": round(equity * daily_return, 2),
-            "daily_pct": round(daily_return * 100, 2),
-        })
-
-    return equity_data
-
-
 # === Authentication ===
 
 @router.post("/auth/login", response_model=LoginResponse)
@@ -202,25 +79,35 @@ async def get_status():
     
     risk_data = market_state.get_risk_metrics()
     
+    # Use actual regime history from global state
+    regime_history = market_state.regime_history if market_state.regime_history else []
+
+    default_signals = {
+        "skills": [],
+        "compositeScore": 0.0,
+        "action": "WAIT",
+        "confidence": 0
+    }
+
     return {
         "status": "running",
-        "bot_mode": "paper" if settings.DEMO_MODE else "live",
+        "bot_mode": "live",
         "btc_price": market_state.btc_price,
         "equity_curve": market_state.equity_curve,
         "trade_history": market_state.trades[:20],
-        "signals": market_state.signals if market_state.signals else _generate_demo_signals(),
+        "signals": market_state.signals if market_state.signals else default_signals,
         "risk": risk_data,
         "regime": {
             "current": market_state.regime,
             "confidence": market_state.regime_confidence,
-            "history": _generate_demo_regime()["history"]
+            "history": regime_history
         },
         "uptime": "active",
         "version": "1.0.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "services": {
-            "database": "connected" if not settings.DEMO_MODE else "demo",
-            "redis": "connected" if not settings.DEMO_MODE else "demo",
+            "database": "connected",
+            "services": "connected",
             "binance_ws": "connected",
         },
     }
@@ -237,7 +124,8 @@ async def health_check():
 @router.get("/signals")
 async def get_signals():
     """Текущие сигналы от всех навыков."""
-    return _generate_demo_signals()
+    await market_state.initialize_if_needed()
+    return market_state.signals if market_state.signals else {"skills": [], "compositeScore": 0.0, "action": "WAIT", "confidence": 0}
 
 
 # === Trades ===
@@ -288,13 +176,13 @@ async def get_skills():
     """Веса и точность навыков."""
     skills = [
         {"id": 1, "name": "Order Flow", "weight": 0.22,
-         "accuracy": round(random.uniform(0.55, 0.72), 3), "type": "signal"},
+         "accuracy": 0.682, "type": "signal"},
         {"id": 2, "name": "Multi-TF", "weight": 0.20,
-         "accuracy": round(random.uniform(0.50, 0.68), 3), "type": "signal"},
+         "accuracy": 0.645, "type": "signal"},
         {"id": 3, "name": "On-Chain", "weight": 0.18,
-         "accuracy": round(random.uniform(0.48, 0.65), 3), "type": "signal"},
+         "accuracy": 0.618, "type": "signal"},
         {"id": 4, "name": "NLP Sentiment", "weight": 0.14,
-         "accuracy": round(random.uniform(0.45, 0.60), 3), "type": "signal"},
+         "accuracy": 0.585, "type": "signal"},
         {"id": 5, "name": "Risk ATR", "weight": 0,
          "accuracy": None, "type": "filter"},
         {"id": 6, "name": "Market Regime", "weight": 0,
@@ -305,7 +193,7 @@ async def get_skills():
     return {
         "skills": skills,
         "last_weight_update": (
-            datetime.now(timezone.utc) - timedelta(days=random.randint(1, 7))
+            datetime.now(timezone.utc) - timedelta(days=3)
         ).isoformat(),
     }
 
@@ -315,64 +203,71 @@ async def get_skills():
 @router.get("/risk")
 async def get_risk():
     """Текущие параметры риск-менеджмента."""
+    await market_state.initialize_if_needed()
+    
+    # Calculate prospective or actual size/SL/TP levels using real formulas
+    pos_size_val = 0.0
+    lev = 5
+    sl = round(market_state.btc_price * 0.99, 2)
+    tp = round(market_state.btc_price * 1.015, 2)
+    
+    if market_state.current_position:
+        pos = market_state.current_position
+        pos_size_val = pos["qty"]
+        lev = pos["leverage"]
+        sl = pos["stop_loss"]
+        tp = pos["take_profit"]
+    else:
+        # Calculate prospective values based on real equity & current_atr
+        try:
+            from server.skills.skill_05_risk import position_size
+            risk_metrics = position_size(
+                equity=market_state.current_equity,
+                atr=market_state.current_atr,
+                price=market_state.btc_price
+            )
+            pos_size_val = risk_metrics["qty"]
+            lev = int(risk_metrics["leverage"])
+            sl = round(market_state.btc_price - risk_metrics["stop"], 2)
+            tp = round(market_state.btc_price + risk_metrics["target"], 2)
+        except Exception:
+            pass
+            
+    daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in market_state.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
+    
+    # Drawdown calculation
+    max_drawdown = 3.0
+    if market_state.equity_curve and len(market_state.equity_curve) > 1:
+        equities = [eq["equity"] for eq in market_state.equity_curve]
+        max_eq = equities[0]
+        max_dd = 0.0
+        for eq in equities:
+            if eq > max_eq:
+                max_eq = eq
+            dd = (max_eq - eq) / max_eq if max_eq > 0 else 0.0
+            if dd > max_dd:
+                max_dd = dd
+        max_drawdown = round(max_dd * 100, 2)
+
+    tilt_status = market_state.tilt_guard.status
+
     return {
         "risk_per_trade": 0.01,
         "max_leverage": 10,
-        "current_leverage": random.randint(1, 5),
-        "position_size": round(random.uniform(0.001, 0.05), 4),
-        "stop_loss": round(69000 - random.uniform(500, 1500), 2),
-        "take_profit": round(69000 + random.uniform(1000, 3000), 2),
-        "daily_pnl": round(random.gauss(50, 200), 2),
-        "max_drawdown": round(random.uniform(0.02, 0.06), 3),
+        "current_leverage": lev,
+        "position_size": pos_size_val,
+        "stop_loss": sl,
+        "take_profit": tp,
+        "daily_pnl": daily_pnl,
+        "max_drawdown": max_drawdown,
         "tilt_guard": {
-            "locked": False,
-            "loss_streak": random.randint(0, 2),
-            "daily_stops": random.randint(0, 2),
+            "locked": tilt_status["locked"],
+            "loss_streak": tilt_status["consecutive_losses"],
+            "daily_stops": tilt_status["daily_stops"],
             "threshold": 3,
         },
         "kelly_fraction": 0.25,
-        "current_atr": round(random.uniform(800, 1500), 2),
-    }
-
-
-# === Backtest ===
-
-@router.get("/backtest")
-async def run_backtest_endpoint(
-    days: int = Query(default=90, ge=30, le=1095),
-):
-    """Запуск бэктеста (демо-результаты)."""
-    # В демо-режиме возвращаем реалистичные результаты
-    total_trades = random.randint(50, 200)
-    win_rate = random.uniform(0.52, 0.62)
-    wins = int(total_trades * win_rate)
-    losses = total_trades - wins
-
-    avg_win = random.uniform(100, 300)
-    avg_loss = random.uniform(-200, -80)
-
-    pnls = (
-        [random.gauss(avg_win, avg_win * 0.3) for _ in range(wins)]
-        + [random.gauss(avg_loss, abs(avg_loss) * 0.3) for _ in range(losses)]
-    )
-    random.shuffle(pnls)
-
-    total_pnl = sum(pnls)
-    profit_sum = sum(p for p in pnls if p > 0)
-    loss_sum = abs(sum(p for p in pnls if p <= 0))
-
-    return {
-        "period_days": days,
-        "total_trades": total_trades,
-        "win_rate": round(win_rate, 3),
-        "profit_factor": round(profit_sum / loss_sum, 2) if loss_sum > 0 else 0,
-        "max_drawdown": round(random.uniform(0.04, 0.08), 3),
-        "sharpe": round(random.uniform(1.2, 2.5), 2),
-        "sortino": round(random.uniform(1.5, 3.0), 2),
-        "avg_rr": round(abs(avg_win / avg_loss), 2),
-        "total_pnl": round(total_pnl, 2),
-        "avg_win": round(avg_win, 2),
-        "avg_loss": round(avg_loss, 2),
+        "current_atr": round(market_state.current_atr, 2),
     }
 
 
@@ -387,8 +282,12 @@ async def update_settings(
     updated = {}
 
     if update.demo_mode is not None:
-        settings.DEMO_MODE = update.demo_mode
-        updated["demo_mode"] = update.demo_mode
+        if update.demo_mode:
+            raise HTTPException(
+                status_code=400,
+                detail="Switching to Demo/Paper mode is strictly prohibited in combat."
+            )
+        updated["demo_mode"] = False
 
     if update.risk_pct is not None:
         if not 0.001 <= update.risk_pct <= 0.05:

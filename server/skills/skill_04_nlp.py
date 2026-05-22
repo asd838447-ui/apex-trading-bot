@@ -92,7 +92,7 @@ _NEWS_SOURCES = [
 async def fetch_crypto_news() -> List[str]:
     """Aggregate headlines from free crypto-news APIs.
 
-    Returns a list of headline strings. On failure returns demo headlines.
+    Returns a list of headline strings. On failure returns empty list.
     """
     headlines: List[str] = []
 
@@ -117,20 +117,6 @@ async def fetch_crypto_news() -> List[str]:
         logger.warning("News fetch session error: %s", exc)
 
     if not headlines:
-        logger.info("No live headlines – using demo data.")
-        headlines = _demo_headlines()
+        logger.info("No live headlines available. Defaulting to neutral sentiment.")
 
     return headlines
-
-
-def _demo_headlines() -> List[str]:
-    """Plausible demo headlines for testing."""
-    return [
-        "Bitcoin reclaims $100K as institutional demand surges",
-        "MicroStrategy adds 5,000 BTC to holdings",
-        "SEC delays spot Bitcoin ETF decision to Q3",
-        "Miners report rising hash rate despite halving",
-        "Whale alert: 10,000 BTC moved from exchange to cold wallet",
-        "Federal Reserve signals cautious approach to rate cuts",
-        "Bitcoin dominance rises to 58% amid altcoin weakness",
-    ]

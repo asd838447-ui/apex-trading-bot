@@ -12,17 +12,17 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
-from server.api.routes import _generate_demo_signals, _generate_demo_regime
 from server.tasks.state import market_state
 
 logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
-    """Менеджер WebSocket подключений."""
+    """Менеджер WebSocket подключений с безопасной сериализацией записи."""
 
     def __init__(self):
         self.active_connections: list[WebSocket] = []
+        self._write_locks: dict[WebSocket, asyncio.Lock] = {}
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket):
@@ -30,6 +30,7 @@ class ConnectionManager:
         await websocket.accept()
         async with self._lock:
             self.active_connections.append(websocket)
+            self._write_locks[websocket] = asyncio.Lock()
         logger.info(
             f"WS клиент подключен. Всего: {len(self.active_connections)}"
         )
@@ -39,12 +40,14 @@ class ConnectionManager:
         async with self._lock:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
+            if websocket in self._write_locks:
+                del self._write_locks[websocket]
         logger.info(
             f"WS клиент отключен. Всего: {len(self.active_connections)}"
         )
 
     async def broadcast(self, message: dict):
-        """Отправляет сообщение всем подключённым клиентам."""
+        """Отправляет сообщение всем подключённым клиентам с блокировкой на запись."""
         if not self.active_connections:
             return
 
@@ -52,28 +55,38 @@ class ConnectionManager:
         disconnected = []
 
         async with self._lock:
-            for connection in self.active_connections:
+            connections = list(self.active_connections)
+
+        for connection in connections:
+            lock = self._write_locks.get(connection)
+            if not lock:
+                continue
+            async with lock:
                 try:
                     await connection.send_text(data)
                 except Exception:
                     disconnected.append(connection)
 
         # Удаляем отключённых
-        for conn in disconnected:
-            async with self._lock:
-                if conn in self.active_connections:
-                    self.active_connections.remove(conn)
+        if disconnected:
+            for conn in disconnected:
+                await self.disconnect(conn)
 
     async def send_personal(self, websocket: WebSocket, message: dict):
-        """Отправляет персональное сообщение клиенту."""
-        try:
-            await websocket.send_json(message)
-        except Exception as e:
-            logger.warning(f"Ошибка отправки персонального сообщения: {e}")
+        """Отправляет персональное сообщение клиенту с блокировкой на запись."""
+        lock = self._write_locks.get(websocket)
+        if not lock:
+            return
+        async with lock:
+            try:
+                await websocket.send_json(message)
+            except Exception as e:
+                logger.warning(f"Ошибка отправки персонального сообщения: {e}")
 
     @property
     def count(self) -> int:
         return len(self.active_connections)
+
 
 
 # Глобальный менеджер
@@ -96,6 +109,65 @@ async def ws_endpoint(websocket: WebSocket):
             "server_version": "1.0.0",
         },
     })
+
+    # Immediate state synchronization upon connection
+    try:
+        await market_state.initialize_if_needed()
+        
+        # Send price_update
+        await manager.send_personal(websocket, {
+            "type": "price_update",
+            "data": {
+                "symbol": "BTCUSDT",
+                "price": round(market_state.btc_price, 2),
+                "change_24h": round(market_state.price_change_24h, 2),
+                "volume_24h": round(market_state.volume_24h, 0),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        })
+
+        # Send signal_update
+        default_signals = {
+            "skills": [],
+            "compositeScore": 0.0,
+            "action": "WAIT",
+            "confidence": 0
+        }
+        await manager.send_personal(websocket, {
+            "type": "signal_update",
+            "data": market_state.signals if market_state.signals else default_signals,
+        })
+
+        # Send regime_update
+        await manager.send_personal(websocket, {
+            "type": "regime_update",
+            "data": {
+                "current": market_state.regime,
+                "confidence": market_state.regime_confidence,
+                "history": market_state.regime_history if market_state.regime_history else []
+            },
+        })
+
+        # Send risk_update
+        await manager.send_personal(websocket, {
+            "type": "risk_update",
+            "data": market_state.get_risk_metrics(),
+        })
+
+        # Send equity_update
+        daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in market_state.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
+        await manager.send_personal(websocket, {
+            "type": "equity_update",
+            "data": {
+                "equity": market_state.current_equity,
+                "daily_pnl": daily_pnl,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "drawdown": "0.00",
+            },
+        })
+    except Exception as e:
+        logger.error(f"Error during WS initial state sync: {e}")
 
     try:
         # Запускаем фоновую задачу для отправки обновлений
@@ -144,7 +216,13 @@ async def _send_periodic_updates(websocket: WebSocket):
 
             # 2. Обновление сигналов (каждые 8 секунд)
             if int(time.time()) % 8 < 2:
-                signals = market_state.signals if market_state.signals else _generate_demo_signals()
+                default_signals = {
+                    "skills": [],
+                    "compositeScore": 0.0,
+                    "action": "WAIT",
+                    "confidence": 0
+                }
+                signals = market_state.signals if market_state.signals else default_signals
                 await manager.send_personal(websocket, {
                     "type": "signal_update",
                     "data": signals,
@@ -157,7 +235,7 @@ async def _send_periodic_updates(websocket: WebSocket):
                     "data": {
                         "current": market_state.regime,
                         "confidence": market_state.regime_confidence,
-                        "history": _generate_demo_regime()["history"]
+                        "history": market_state.regime_history if market_state.regime_history else []
                     },
                 })
 
@@ -171,7 +249,7 @@ async def _send_periodic_updates(websocket: WebSocket):
 
             # 5. Обновление equity (каждые 20 секунд)
             if int(time.time()) % 20 < 2:
-                daily_pnl = round(sum(t["pnl"] for t in market_state.trades if t["time"][:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
+                daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in market_state.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
                 await manager.send_personal(websocket, {
                     "type": "equity_update",
                     "data": {
@@ -208,7 +286,13 @@ async def _handle_client_message(websocket: WebSocket, message: dict):
         })
 
     elif msg_type == "request_signals":
-        signals = _generate_demo_signals()
+        default_signals = {
+            "skills": [],
+            "compositeScore": 0.0,
+            "action": "WAIT",
+            "confidence": 0
+        }
+        signals = market_state.signals if market_state.signals else default_signals
         await manager.send_personal(websocket, {
             "type": "signal_update",
             "data": signals,

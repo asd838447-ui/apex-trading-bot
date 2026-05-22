@@ -56,11 +56,12 @@ def features(df: pd.DataFrame) -> np.ndarray:
 
     X = np.column_stack([adx, bb, atr_norm])
 
-    # Drop leading NaN rows
-    valid_mask = ~np.isnan(X).any(axis=1)
-    if not valid_mask.all():
-        first_valid = np.argmax(valid_mask)
-        X = X[first_valid:]
+    # Clean NaNs and Infs
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Drop non-finite rows
+    valid_mask = np.isfinite(X).all(axis=1)
+    X = X[valid_mask]
 
     return X
 
