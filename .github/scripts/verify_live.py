@@ -3,8 +3,15 @@ import time
 import requests
 from google import genai
 
-# Настройки
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+client = None
+def get_ai_client():
+    global client
+    if client is None:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set.")
+        client = genai.Client(api_key=api_key)
+    return client
 APP_URL = os.environ.get("RENDER_APP_URL", "https://ТВОЙ-САЙТ.onrender.com") # ВАЖНО: Замени на свой URL!
 ENDPOINT_TO_CHECK = f"{APP_URL}/" # Замени на нужный эндпоинт, если бот отдает данные по другому пути, например /api/data
 FILE_TO_FIX = "server/main.py"
@@ -61,13 +68,18 @@ def ask_ai_to_fix(error_msg):
     3. Без разметки, без тегов и без комментариев от себя.
     """
     
+    client = get_ai_client()
     res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
     new_code = res.text.strip()
-    
-    backticks = "`" * 3
-    if new_code.startswith(backticks):
-         new_code = "\n".join(new_code.split("\n")[1:-1])
-         
+    backticks = "```"
+    if new_code.startswith(backticks) or new_code.endswith(backticks):
+         lines = new_code.split("\n")
+         if lines and lines[0].startswith(backticks):
+             lines = lines[1:]
+         if lines and lines[-1].startswith(backticks):
+             lines = lines[:-1]
+         new_code = "\n".join(lines)
+
     with open(FILE_TO_FIX, "w", encoding="utf-8") as f:
         f.write(new_code)
     print("Код переписан нейросетью. Подготавливаем коммит.")

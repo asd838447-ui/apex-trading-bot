@@ -37,11 +37,16 @@ def fix_file(file_path):
     )
     result = response.text.strip()
     
-    # Безопасная очистка (без использования трех кавычек в тексте)
-    backticks = "" * 3
-    if result.startswith(backticks):
-        result = "\n".join(result.split("\n")[1:-1])
-        
+    # Безопасная очистка от markdown-разметки (```python или ```yaml и закрывающие ```)
+    backticks = "```"
+    if result.startswith(backticks) or result.endswith(backticks):
+        lines = result.split("\n")
+        if lines and lines[0].startswith(backticks):
+            lines = lines[1:]
+        if lines and lines[-1].startswith(backticks):
+            lines = lines[:-1]
+        result = "\n".join(lines)
+
     if "PERFECT" in result:
         print(f"[{file_path}] Код идеален. Ошибок не найдено.\n")
         return
