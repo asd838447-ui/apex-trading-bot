@@ -29,18 +29,19 @@ def run_local_test():
         text=True
     )
     
-    # Сначала запрашиваем актуальную биржевую цену BTC/USDT напрямую с Binance REST API для сопоставления
+    # Запрашиваем эталонную цену BTC/USDT напрямую с Binance FUTURES REST API,
+    # так как бот работает на фьючерсном рынке. Это гарантирует отсутствие расхождения спот-фьючерс.
     public_price = None
     try:
-        print("[INFO] Запрашиваем эталонную биржевую цену BTCUSDT с Binance API...")
-        public_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
+        print("[INFO] Запрашиваем эталонную биржевую цену BTCUSDT с Binance Futures REST API...")
+        public_res = requests.get("https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT", timeout=5)
         if public_res.status_code == 200:
             public_price = float(public_res.json()["price"])
-            print(f"[INFO] Эталонная цена Binance: ${public_price:.2f}")
+            print(f"[INFO] Эталонная цена фьючерса Binance: ${public_price:.2f}")
         else:
-            print(f"[WARNING] Binance API ответил с кодом {public_res.status_code}")
+            print(f"[WARNING] Binance Futures REST API ответил с кодом {public_res.status_code}")
     except Exception as pe:
-        print(f"[WARNING] Не удалось получить эталонную цену с Binance API: {pe}")
+        print(f"[WARNING] Не удалось получить эталонную цену с Binance Futures REST API: {pe}")
 
     # Резолвим проблему с таймаутом старта: опрашиваем сервер в течение 15 секунд,
     # давая HMM классификатору обучиться, а WebSocket - подключиться и обновить цену.
@@ -88,17 +89,19 @@ def run_local_test():
             data_json = response.json()
             bot_price = float(data_json.get("btc_price", 0))
             
-            # Сопоставляем с реальной биржевой ценой с допустимым отклонением в 2%
+            # Сопоставляем с реальной биржевой ценой с максимально строгим допуском (0.1%),
+            # так как оба источника берут данные с одного и того же рынка (Binance Futures).
+            # Небольшое отклонение до 0.1% возможно исключительно из-за миллисекундной разницы во времени запросов в постоянно движущемся стакане.
             if public_price:
                 diff_pct = (abs(bot_price - public_price) / public_price) * 100
                 print(f"[INFO] Сверка: Цена бота = ${bot_price:.2f}, Биржевая цена = ${public_price:.2f}, Отклонение = {diff_pct:.4f}%")
                 
-                if diff_pct > 2.0:
+                if diff_pct > 0.1:
                     process.kill()
                     log_file.close()
-                    return False, f"ЛОГИЧЕСКАЯ ОШИБКА. Обнаружено расхождение цен! Цена в боте (${bot_price:.2f}) отличается от реальной биржевой цены (${public_price:.2f}) более чем на 2% (отклонение: {diff_pct:.2f}%). WebSocket поставляет некорректные или устаревшие данные."
+                    return False, f"ЛОГИЧЕСКАЯ ОШИБКА. Обнаружено расхождение цен! Цена в боте (${bot_price:.2f}) отличается от реальной цены Binance Futures (${public_price:.2f}) более чем на 0.1% (отклонение: {diff_pct:.2f}%). Проверьте стабильность соединения."
             
-            print("[SUCCESS] Все проверки пройдены! Котировки бота полностью соответствуют реальному рынку. Деплой разрешен.")
+            print("[SUCCESS] Все проверки пройдены! Котировки бота идеально соответствуют реальному фьючерсному рынку. Деплой разрешен.")
             process.kill()
             log_file.close()
             return True, ""
