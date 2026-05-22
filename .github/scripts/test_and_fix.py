@@ -1,4 +1,6 @@
 import os
+import time
+import requests
 import subprocess
 from google import genai
 
@@ -8,8 +10,7 @@ FILE_TO_FIX = "server/main.py"
 def run_local_test():
     print("Запускаем локальный краш-тест бота...")
     
-    # Пытаемся запустить сервер на 5 секунд
-    # Если в коде есть синтаксическая ошибка, он упадет мгновенно
+    # 1. Запускаем сервер локально
     process = subprocess.Popen(
         ["uvicorn", "server.main:app", "--host", "127.0.0.1", "--port", "8000"],
         stdout=subprocess.PIPE,
@@ -17,45 +18,63 @@ def run_local_test():
         text=True
     )
     
-    try:
-        # Ждем 5 секунд. Если не упал - значит базово работает
-        stdout, stderr = process.communicate(timeout=5)
-        print("✅ Сервер успешно запустился. Критических ошибок нет.")
-        return True, ""
-    except subprocess.TimeoutExpired:
-        # Сервер работает и не падает - это отлично!
-        process.kill()
-        print("✅ Сервер стабилен, таймаут прошел успешно.")
-        return True, ""
-    except Exception as e:
-        process.kill()
+    # Даем серверу 3 секунды на то, чтобы загрузиться
+    time.sleep(3)
+    
+    # 2. ПРОВЕРКА НА КРАШ: Не упал ли сервер сразу?
+    if process.poll() is not None:
         stdout, stderr = process.communicate()
-        return False, stderr # Возвращаем ТОТ САМЫЙ лог ошибки
+        return False, f"КРИТИЧЕСКАЯ ОШИБКА (Crash). Сервер не запустился:\n{stderr}"
+
+    # 3. ПРОВЕРКА ДАННЫХ: Делаем запрос к нашему запущенному боту
+    try:
+        print("Сервер работает. Проверяем выдачу реальных данных...")
+        # Если твой бот отдает данные по другому адресу, поменяй "/" на "/api/data" и т.д.
+        response = requests.get("http://127.0.0.1:8000/", timeout=5)
+        
+        if response.status_code == 200:
+            data = response.text
+            
+            # ЩЕПЕТИЛЬНАЯ ПРОВЕРКА: Ищем признаки кривых данных
+            if "error" in data.lower() or "traceback" in data.lower() or data.strip() == "":
+                process.kill()
+                return False, f"ЛОГИЧЕСКАЯ ОШИБКА. Сервер отдал 200 OK, но данные кривые:\n{data[:500]}"
+            
+            print("✅ Данные валидны! Деплой разрешен.")
+            process.kill()
+            return True, ""
+            
+        else:
+            process.kill()
+            return False, f"ОШИБКА API (Код {response.status_code}). Ответ сервера:\n{response.text[:500]}"
+            
+    except requests.exceptions.RequestException as e:
+        process.kill()
+        return False, f"СЕТЕВАЯ ОШИБКА. Сервер висит, но не отвечает на запросы:\n{str(e)}"
 
 def ask_ai_to_fix(error_log):
-    print("❌ Сервер упал! Отправляем лог ошибки в ИИ...")
+    print("❌ Найдена проблема! Отправляем лог ошибки в ИИ...")
     with open(FILE_TO_FIX, "r", encoding="utf-8") as f:
         content = f.read()
         
     prompt = f"""
-    Ты QA-инженер. Мы попытались запустить сервер, но он упал с ошибкой.
+    Ты QA-инженер и архитектор торгового бота. Во время локального тестирования перед деплоем найдена проблема.
     
-    ПОЛНЫЙ ЛОГ ОШИБКИ (Traceback):
+    ЛОГ ОШИБКИ ИЛИ КРИВЫХ ДАННЫХ:
     {error_log}
     
-    ТЕКУЩИЙ КОД:
+    ТЕКУЩИЙ КОД БОТА:
     {content}
     
     ЗАДАЧА:
-    1. Изучи лог ошибки. Найди, из-за чего падает сервер (незакрытые скобки, импорты, логика).
-    2. Верни ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ код.
+    1. Изучи ошибку. Если это краш — исправь синтаксис/импорты. Если это логическая ошибка — исправь алгоритм расчета или формирования JSON/ответа.
+    2. Верни ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ код от первой до последней строчки.
     3. Без разметки, без тегов и без комментариев.
     """
     
     res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
     new_code = res.text.strip()
     
-    # Очистка от кавычек ```
     backticks = "`" * 3
     if new_code.startswith(backticks):
          new_code = "\n".join(new_code.split("\n")[1:-1])
@@ -68,5 +87,4 @@ success, error_reason = run_local_test()
 
 if not success:
     ask_ai_to_fix(error_reason)
-    # Завершаем с ошибкой, чтобы GitHub остановил деплой
     exit(1)
