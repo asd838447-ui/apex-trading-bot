@@ -1,22 +1,40 @@
-name: Gemini AI Code Review
+name: Gemini AI Auto-Fixer
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize]
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
-  review:
+  fixer:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Run Gemini AI Review
-        uses: google-github-actions/run-gemini-cli@main
+      - uses: actions/checkout@v4
         with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          model: "gemini-1.5-pro" # Используем Pro версию для лучшего качества кода
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Run AI Auto-Fixer
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # Устанавливаем библиотеку для работы с Gemini
+          pip install google-generativeai
+          
+          # Запускаем Python-скрипт, который проанализирует файлы и сделает коммит
+          python .github/scripts/fix_code.py
+      
+      - name: Commit changes
+        run: |
+          git config --global user.name "AI Auto-Fixer"
+          git config --global user.email "ai@bot.com"
+          git add .
+          git commit -m "AI: Исправление архитектурных ошибок" || echo "Изменений нет"
+          git push
