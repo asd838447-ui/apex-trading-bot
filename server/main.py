@@ -115,3 +115,5 @@ else:
             "frontend_status": "Not served (client/dist folder missing)",
             "docs": "/docs",
         }
+
+# Тест для AI бота.
