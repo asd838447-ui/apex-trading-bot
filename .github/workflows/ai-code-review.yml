@@ -1,0 +1,22 @@
+name: Gemini AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run Gemini AI Review
+        uses: google-github-actions/run-gemini-cli@main
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          model: "gemini-1.5-pro" # Используем Pro версию для лучшего качества кода
