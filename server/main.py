@@ -92,3 +92,4 @@ else:
             "message": "APEX Trading Bot API is running.",
             "frontend_status": "Not served (client/dist folder missing)",
             "docs": "/docs",
+        }
