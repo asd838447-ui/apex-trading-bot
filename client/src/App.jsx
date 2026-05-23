@@ -19,31 +19,33 @@ const SKILLS = [
 
 export default function App() {
   // Core state initialized to neutral/empty values for strictly live data
-  const [btcPrice, setBtcPrice] = useState(0.0);
+  const [prices, setPrices] = useState({
+    BTCUSDT: 0.0,
+    ETHUSDT: 0.0,
+    SOLUSDT: 0.0,
+  });
+  const [selectedSymbol, setSelectedSymbol] = useState('BTCUSDT');
   const [equityCurve, setEquityCurve] = useState([]);
   const [tradeHistory, setTradeHistory] = useState([]);
-  const [signals, setSignals] = useState({
-    skills: [],
-    compositeScore: 0.0,
-    action: 'WAIT',
-    confidence: 0,
+
+  const [multiSignals, setMultiSignals] = useState({
+    BTCUSDT: { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 },
+    ETHUSDT: { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 },
+    SOLUSDT: { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 },
   });
-  const [risk, setRisk] = useState({
-    positionSize: 0.0,
-    leverage: 5,
-    stopLoss: 0.0,
-    takeProfit: 0.0,
-    dailyPnl: 0.0,
-    maxDrawdown: 3.0,
-    riskPerTrade: 1.0,
-    tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 },
-    lossStreak: 0,
+  
+  const [multiRisks, setMultiRisks] = useState({
+    BTCUSDT: { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 },
+    ETHUSDT: { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 },
+    SOLUSDT: { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 },
   });
-  const [regime, setRegime] = useState({
-    current: 'FLAT',
-    confidence: 100.0,
-    history: [],
+
+  const [multiRegimes, setMultiRegimes] = useState({
+    BTCUSDT: { current: 'FLAT', confidence: 100.0, history: [] },
+    ETHUSDT: { current: 'FLAT', confidence: 100.0, history: [] },
+    SOLUSDT: { current: 'FLAT', confidence: 100.0, history: [] },
   });
+
   const [botMode, setBotMode] = useState('live');
   const [systemStatus, setSystemStatus] = useState('running');
 
@@ -61,21 +63,29 @@ export default function App() {
   // Ref to hold tick counter for frequency measurement
   const tickCounterRef = useRef(0);
 
-  const latestPriceRef = useRef(0.0);
+  const latestPricesRef = useRef({ BTCUSDT: 0.0, ETHUSDT: 0.0, SOLUSDT: 0.0 });
   const latestSourceRef = useRef('Local Server');
 
   // Throttled UI updater for high-frequency price data (100ms interval / 10Hz) to prevent browser main-thread choking
   useEffect(() => {
     const timer = setInterval(() => {
-      if (latestPriceRef.current !== 0.0) {
-        setBtcPrice(latestPriceRef.current);
+      let changed = false;
+      const nextPrices = { ...prices };
+      for (const symbol of ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']) {
+        if (latestPricesRef.current[symbol] !== 0.0 && latestPricesRef.current[symbol] !== prices[symbol]) {
+          nextPrices[symbol] = latestPricesRef.current[symbol];
+          changed = true;
+        }
+      }
+      if (changed) {
+        setPrices(nextPrices);
       }
       if (latestSourceRef.current !== '') {
         setLastActiveSource(latestSourceRef.current);
       }
     }, 100);
     return () => clearInterval(timer);
-  }, []);
+  }, [prices]);
 
   // WebSocket
   const wsUrl = useMemo(() => {
@@ -98,23 +108,35 @@ export default function App() {
       {
         id: 'binanceFutures',
         name: 'Binance Fut',
-        url: 'wss://fstream.binance.com/ws/btcusdt@aggTrade',
-        parse: (data) => data && data.p ? parseFloat(data.p) : null
+        url: 'wss://fstream.binance.com/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade',
+        parse: (data) => {
+          if (data && data.data && data.data.p && data.data.s) {
+            return { symbol: data.data.s, price: parseFloat(data.data.p) };
+          }
+          return null;
+        }
       },
       {
         id: 'binanceSpot',
         name: 'Binance Spot',
-        url: 'wss://stream.binance.com:9443/ws/btcusdt@aggTrade',
-        parse: (data) => data && data.p ? parseFloat(data.p) : null
+        url: 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade',
+        parse: (data) => {
+          if (data && data.data && data.data.p && data.data.s) {
+            return { symbol: data.data.s, price: parseFloat(data.data.p) };
+          }
+          return null;
+        }
       },
       {
         id: 'bybitFutures',
         name: 'Bybit Fut',
         url: 'wss://stream.bybit.com/v5/public/linear',
-        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT'] },
+        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT', 'publicTrade.ETHUSDT', 'publicTrade.SOLUSDT'] },
         parse: (data) => {
-          if (data && data.topic === 'publicTrade.BTCUSDT' && data.data && data.data[0]) {
-            return parseFloat(data.data[0].p);
+          if (data && data.topic && data.data && data.data[0]) {
+            const parts = data.topic.split('.');
+            const symbol = parts[parts.length - 1];
+            return { symbol, price: parseFloat(data.data[0].p) };
           }
           return null;
         }
@@ -123,10 +145,12 @@ export default function App() {
         id: 'bybitSpot',
         name: 'Bybit Spot',
         url: 'wss://stream.bybit.com/v5/public/spot',
-        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT'] },
+        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT', 'publicTrade.ETHUSDT', 'publicTrade.SOLUSDT'] },
         parse: (data) => {
-          if (data && data.topic === 'publicTrade.BTCUSDT' && data.data && data.data[0]) {
-            return parseFloat(data.data[0].p);
+          if (data && data.topic && data.data && data.data[0]) {
+            const parts = data.topic.split('.');
+            const symbol = parts[parts.length - 1];
+            return { symbol, price: parseFloat(data.data[0].p) };
           }
           return null;
         }
@@ -135,10 +159,12 @@ export default function App() {
         id: 'okxSpot',
         name: 'OKX Spot',
         url: 'wss://ws.okx.com:8443/ws/v5/public',
-        subscribe: { op: 'subscribe', args: [{ channel: 'trades', instId: 'BTC-USDT' }] },
+        subscribe: { op: 'subscribe', args: [{ channel: 'trades', instId: 'BTC-USDT' }, { channel: 'trades', instId: 'ETH-USDT' }, { channel: 'trades', instId: 'SOL-USDT' }] },
         parse: (data) => {
-          if (data && data.arg && data.arg.channel === 'trades' && data.data && data.data[0]) {
-            return parseFloat(data.data[0].px);
+          if (data && data.arg && data.data && data.data[0]) {
+            const instId = data.arg.instId;
+            const symbol = instId.replace('-', '');
+            return { symbol, price: parseFloat(data.data[0].px) };
           }
           return null;
         }
@@ -165,9 +191,9 @@ export default function App() {
         ws.onmessage = (event) => {
           try {
             const rawData = JSON.parse(event.data);
-            const price = source.parse(rawData);
-            if (price && !isNaN(price)) {
-              latestPriceRef.current = price;
+            const res = source.parse(rawData);
+            if (res && res.symbol && res.price && !isNaN(res.price)) {
+              latestPricesRef.current[res.symbol] = res.price;
               latestSourceRef.current = source.name;
               tickCounterRef.current += 1;
               lastDirectTickTimeRef.current = Date.now();
@@ -203,7 +229,7 @@ export default function App() {
       }, delay + jitter);
     };
 
-    // Connect to all 5 sources in parallel on startup
+    // Connect to all sources in parallel on startup
     sources.forEach((src) => connectSource(src));
 
     // Dynamic feed frequency calculator
@@ -233,10 +259,12 @@ export default function App() {
     const { type, data } = lastMessage;
     switch (type) {
       case 'price_update':
-        // Use backend price update as a fallback if direct streams are lagging or inactive
-        if (Date.now() - lastDirectTickTimeRef.current > 3000 || latestPriceRef.current === 0.0) {
-          latestPriceRef.current = data.price;
-          latestSourceRef.current = 'Local Server';
+        if (data.symbol) {
+          const sym = data.symbol;
+          if (Date.now() - lastDirectTickTimeRef.current > 3000 || latestPricesRef.current[sym] === 0.0) {
+            latestPricesRef.current[sym] = data.price;
+            latestSourceRef.current = 'Local Server';
+          }
         }
         break;
       case 'equity_update':
@@ -257,13 +285,32 @@ export default function App() {
         });
         break;
       case 'signal_update':
-        setSignals(data);
+        if (data.symbol && data.signals) {
+          setMultiSignals((prev) => ({ ...prev, [data.symbol]: data.signals }));
+        } else {
+          setMultiSignals((prev) => ({ ...prev, BTCUSDT: data }));
+        }
         break;
       case 'risk_update':
-        setRisk(data);
+        if (data.symbol && data.metrics) {
+          setMultiRisks((prev) => ({ ...prev, [data.symbol]: data.metrics }));
+        } else {
+          setMultiRisks((prev) => ({ ...prev, BTCUSDT: data }));
+        }
         break;
       case 'regime_update':
-        setRegime(data);
+        if (data.symbol) {
+          setMultiRegimes((prev) => ({
+            ...prev,
+            [data.symbol]: {
+              current: data.current,
+              confidence: data.confidence,
+              history: data.history || []
+            }
+          }));
+        } else {
+          setMultiRegimes((prev) => ({ ...prev, BTCUSDT: data }));
+        }
         break;
       case 'status_update':
         setSystemStatus(data.status);
@@ -282,13 +329,26 @@ export default function App() {
           const data = await res.json();
           if (data.equity_curve) setEquityCurve(data.equity_curve);
           if (data.trade_history) setTradeHistory(data.trade_history);
-          if (data.signals) setSignals(data.signals);
-          if (data.risk) setRisk(data.risk);
-          if (data.regime) setRegime(data.regime);
-          if (data.btc_price) {
-            setBtcPrice(data.btc_price);
-            latestPriceRef.current = data.btc_price;
+          
+          if (data.multi_signals) setMultiSignals(data.multi_signals);
+          else if (data.signals) setMultiSignals((prev) => ({ ...prev, BTCUSDT: data.signals }));
+
+          if (data.multi_risks) setMultiRisks(data.multi_risks);
+          else if (data.risk) setMultiRisks((prev) => ({ ...prev, BTCUSDT: data.risk }));
+
+          if (data.multi_regimes) setMultiRegimes(data.multi_regimes);
+          else if (data.regime) setMultiRegimes((prev) => ({ ...prev, BTCUSDT: data.regime }));
+
+          if (data.prices) {
+            setPrices(data.prices);
+            Object.keys(data.prices).forEach((k) => {
+              latestPricesRef.current[k] = data.prices[k];
+            });
+          } else if (data.btc_price) {
+            setPrices((prev) => ({ ...prev, BTCUSDT: data.btc_price }));
+            latestPricesRef.current.BTCUSDT = data.btc_price;
           }
+
           if (data.bot_mode) setBotMode(data.bot_mode);
           if (data.status) setSystemStatus(data.status);
         }
@@ -306,7 +366,7 @@ export default function App() {
   return (
     <div className="app-container">
       <Header
-        btcPrice={btcPrice}
+        prices={prices}
         isConnected={isConnected}
         systemStatus={systemStatus}
         botMode={botMode}
@@ -316,12 +376,14 @@ export default function App() {
         ticksPerSecond={ticksPerSecond}
       />
       <Dashboard
+        selectedSymbol={selectedSymbol}
+        setSelectedSymbol={setSelectedSymbol}
+        multiSignals={multiSignals}
+        multiRisks={multiRisks}
+        multiRegimes={multiRegimes}
+        prices={prices}
         equityCurve={equityCurve}
         tradeHistory={tradeHistory}
-        signals={signals}
-        risk={risk}
-        regime={regime}
-        btcPrice={btcPrice}
       />
     </div>
   );

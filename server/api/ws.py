@@ -112,49 +112,60 @@ async def ws_endpoint(websocket: WebSocket):
 
     # Immediate state synchronization upon connection
     try:
+        from server.config import settings
         await market_state.initialize_if_needed()
         
-        # Send price_update
-        await manager.send_personal(websocket, {
-            "type": "price_update",
-            "data": {
-                "symbol": "BTCUSDT",
-                "price": round(market_state.btc_price, 2),
-                "change_24h": round(market_state.price_change_24h, 2),
-                "volume_24h": round(market_state.volume_24h, 0),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
-        })
+        # Send price_update for all supported symbols
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            price = market_state.prices.get(symbol, 93250.0 if symbol == "BTCUSDT" else 3500.0 if symbol == "ETHUSDT" else 150.0)
+            change_24h = market_state.price_changes_24h.get(symbol, 0.0)
+            volume_24h = market_state.volumes_24h.get(symbol, 0.0)
+            await manager.send_personal(websocket, {
+                "type": "price_update",
+                "data": {
+                    "symbol": symbol,
+                    "price": round(price, 2 if symbol != "SOLUSDT" else 3),
+                    "change_24h": round(change_24h, 2),
+                    "volume_24h": round(volume_24h, 0),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            })
 
-        # Send signal_update
-        default_signals = {
-            "skills": [],
-            "compositeScore": 0.0,
-            "action": "WAIT",
-            "confidence": 0
-        }
-        await manager.send_personal(websocket, {
-            "type": "signal_update",
-            "data": market_state.signals if market_state.signals else default_signals,
-        })
+        # Send signal_update for all supported symbols
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            signals = market_state.multi_signals.get(symbol)
+            if signals:
+                await manager.send_personal(websocket, {
+                    "type": "signal_update",
+                    "data": {
+                        "symbol": symbol,
+                        "signals": signals
+                    },
+                })
 
-        # Send regime_update
-        await manager.send_personal(websocket, {
-            "type": "regime_update",
-            "data": {
-                "current": market_state.regime,
-                "confidence": market_state.regime_confidence,
-                "history": market_state.regime_history if market_state.regime_history else []
-            },
-        })
+        # Send regime_update for all supported symbols
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            await manager.send_personal(websocket, {
+                "type": "regime_update",
+                "data": {
+                    "symbol": symbol,
+                    "current": market_state.regimes.get(symbol, "TREND"),
+                    "confidence": market_state.regime_confidences.get(symbol, 85.0),
+                    "history": market_state.regime_histories.get(symbol, [])
+                },
+            })
 
-        # Send risk_update
-        await manager.send_personal(websocket, {
-            "type": "risk_update",
-            "data": market_state.get_risk_metrics(),
-        })
+        # Send risk_update for all supported symbols
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            await manager.send_personal(websocket, {
+                "type": "risk_update",
+                "data": {
+                    "symbol": symbol,
+                    "metrics": market_state.get_risk_metrics(symbol=symbol)
+                },
+            })
 
-        # Send equity_update
+        # Send equity_update (shared/portfolio level)
         daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in market_state.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
         await manager.send_personal(websocket, {
             "type": "equity_update",
@@ -197,44 +208,52 @@ async def ws_endpoint(websocket: WebSocket):
 async def _send_periodic_updates(websocket: WebSocket):
     """Отправляет периодические обновления клиенту."""
     try:
+        from server.config import settings
         await market_state.initialize_if_needed()
         
         while True:
+            now_sec = int(time.time())
+            
             # 1. Обновление сигналов (каждые 8 секунд)
-            if int(time.time()) % 8 < 2:
-                default_signals = {
-                    "skills": [],
-                    "compositeScore": 0.0,
-                    "action": "WAIT",
-                    "confidence": 0
-                }
-                signals = market_state.signals if market_state.signals else default_signals
-                await manager.send_personal(websocket, {
-                    "type": "signal_update",
-                    "data": signals,
-                })
+            if now_sec % 8 < 2:
+                for symbol in settings.SUPPORTED_SYMBOLS:
+                    signals = market_state.multi_signals.get(symbol)
+                    if signals:
+                        await manager.send_personal(websocket, {
+                            "type": "signal_update",
+                            "data": {
+                                "symbol": symbol,
+                                "signals": signals
+                            },
+                        })
 
             # 2. Обновление режима рынка (каждые 15 секунд)
-            if int(time.time()) % 15 < 2:
-                await manager.send_personal(websocket, {
-                    "type": "regime_update",
-                    "data": {
-                        "current": market_state.regime,
-                        "confidence": market_state.regime_confidence,
-                        "history": market_state.regime_history if market_state.regime_history else []
-                    },
-                })
+            if now_sec % 15 < 2:
+                for symbol in settings.SUPPORTED_SYMBOLS:
+                    await manager.send_personal(websocket, {
+                        "type": "regime_update",
+                        "data": {
+                            "symbol": symbol,
+                            "current": market_state.regimes.get(symbol, "TREND"),
+                            "confidence": market_state.regime_confidences.get(symbol, 85.0),
+                            "history": market_state.regime_histories.get(symbol, [])
+                        },
+                    })
 
             # 3. Обновление параметров риска (каждые 12 секунд)
-            if int(time.time()) % 12 < 2:
-                risk_data = market_state.get_risk_metrics()
-                await manager.send_personal(websocket, {
-                    "type": "risk_update",
-                    "data": risk_data,
-                })
+            if now_sec % 12 < 2:
+                for symbol in settings.SUPPORTED_SYMBOLS:
+                    risk_data = market_state.get_risk_metrics(symbol=symbol)
+                    await manager.send_personal(websocket, {
+                        "type": "risk_update",
+                        "data": {
+                            "symbol": symbol,
+                            "metrics": risk_data
+                        },
+                    })
 
             # 4. Обновление equity (каждые 20 секунд)
-            if int(time.time()) % 20 < 2:
+            if now_sec % 20 < 2:
                 daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in market_state.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
                 await manager.send_personal(websocket, {
                     "type": "equity_update",
@@ -274,17 +293,17 @@ async def _handle_client_message(websocket: WebSocket, message: dict):
         })
 
     elif msg_type == "request_signals":
-        default_signals = {
-            "skills": [],
-            "compositeScore": 0.0,
-            "action": "WAIT",
-            "confidence": 0
-        }
-        signals = market_state.signals if market_state.signals else default_signals
-        await manager.send_personal(websocket, {
-            "type": "signal_update",
-            "data": signals,
-        })
+        from server.config import settings
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            signals = market_state.multi_signals.get(symbol)
+            if signals:
+                await manager.send_personal(websocket, {
+                    "type": "signal_update",
+                    "data": {
+                        "symbol": symbol,
+                        "signals": signals
+                    },
+                })
 
     else:
         logger.debug(f"Неизвестный тип WS сообщения: {msg_type}")

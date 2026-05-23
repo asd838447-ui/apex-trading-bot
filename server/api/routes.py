@@ -121,6 +121,21 @@ async def get_status():
         "status": "running",
         "bot_mode": "live",
         "btc_price": market_state.btc_price,
+        "prices": market_state.prices,
+        "active_positions": market_state.active_positions,
+        "multi_signals": market_state.multi_signals,
+        "multi_regimes": {
+            symbol: {
+                "current": market_state.regimes.get(symbol, "TREND"),
+                "confidence": market_state.regime_confidences.get(symbol, 85.0),
+                "history": market_state.regime_histories.get(symbol, [])
+            }
+            for symbol in settings.SUPPORTED_SYMBOLS
+        },
+        "multi_risks": {
+            symbol: market_state.get_risk_metrics(symbol=symbol)
+            for symbol in settings.SUPPORTED_SYMBOLS
+        },
         "equity_curve": market_state.equity_curve,
         "trade_history": market_state.trades[:20],
         "signals": market_state.signals if market_state.signals else default_signals,
@@ -178,9 +193,11 @@ async def health_check():
 # === Signals ===
 
 @router.get("/signals")
-async def get_signals():
+async def get_signals(symbol: Optional[str] = None):
     """Текущие сигналы от всех навыков."""
     await market_state.initialize_if_needed()
+    if symbol and symbol in market_state.multi_signals:
+        return market_state.multi_signals[symbol]
     return market_state.signals if market_state.signals else {"skills": [], "compositeScore": 0.0, "action": "WAIT", "confidence": 0}
 
 
@@ -257,18 +274,21 @@ async def get_skills():
 # === Risk ===
 
 @router.get("/risk")
-async def get_risk():
+async def get_risk(symbol: Optional[str] = None):
     """Текущие параметры риск-менеджмента."""
     await market_state.initialize_if_needed()
+    
+    target_symbol = symbol if (symbol and symbol in settings.SUPPORTED_SYMBOLS) else "BTCUSDT"
     
     # Calculate prospective or actual size/SL/TP levels using real formulas
     pos_size_val = 0.0
     lev = 5
-    sl = round(market_state.btc_price * 0.99, 2)
-    tp = round(market_state.btc_price * 1.015, 2)
+    price = market_state.prices.get(target_symbol, 93250.0)
+    sl = round(price * 0.99, 2 if target_symbol != "SOLUSDT" else 3)
+    tp = round(price * 1.015, 2 if target_symbol != "SOLUSDT" else 3)
     
-    if market_state.current_position:
-        pos = market_state.current_position
+    pos = market_state.active_positions.get(target_symbol)
+    if pos:
         pos_size_val = pos["qty"]
         lev = pos["leverage"]
         sl = pos["stop_loss"]
@@ -277,15 +297,16 @@ async def get_risk():
         # Calculate prospective values based on real equity & current_atr
         try:
             from server.skills.skill_05_risk import position_size
+            atr = market_state.atrs.get(target_symbol, 1200.0 if target_symbol == "BTCUSDT" else 50.0 if target_symbol == "ETHUSDT" else 3.5)
             risk_metrics = position_size(
                 equity=market_state.current_equity,
-                atr=market_state.current_atr,
-                price=market_state.btc_price
+                atr=atr,
+                price=price
             )
             pos_size_val = risk_metrics["qty"]
             lev = int(risk_metrics["leverage"])
-            sl = round(market_state.btc_price - risk_metrics["stop"], 2)
-            tp = round(market_state.btc_price + risk_metrics["target"], 2)
+            sl = round(price - risk_metrics["stop"], 2 if target_symbol != "SOLUSDT" else 3)
+            tp = round(price + risk_metrics["target"], 2 if target_symbol != "SOLUSDT" else 3)
         except Exception:
             pass
             
@@ -323,7 +344,7 @@ async def get_risk():
             "threshold": 3,
         },
         "kelly_fraction": 0.25,
-        "current_atr": round(market_state.current_atr, 2),
+        "current_atr": round(market_state.atrs.get(target_symbol, 1200.0), 2 if target_symbol != "SOLUSDT" else 3),
     }
 
 

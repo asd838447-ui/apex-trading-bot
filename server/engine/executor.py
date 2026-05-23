@@ -24,6 +24,17 @@ class OrderExecutor:
         self.active_orders: list[dict] = []
         self.positions: list[dict] = []
 
+    def get_precision_rules(self, symbol: str) -> dict:
+        """Возвращает правила округления лота, цены и минимальный лот для каждого инструмента."""
+        if symbol == "BTCUSDT":
+            return {"min_qty": 0.001, "round_qty": 3, "round_price": 2, "price_step": 0.001}
+        elif symbol == "ETHUSDT":
+            return {"min_qty": 0.01, "round_qty": 3, "round_price": 2, "price_step": 0.001}
+        elif symbol == "SOLUSDT":
+            return {"min_qty": 0.1, "round_qty": 2, "round_price": 3, "price_step": 0.001}
+        else:
+            return {"min_qty": 0.001, "round_qty": 3, "round_price": 2, "price_step": 0.001}
+
     async def open_position(
         self,
         signal: dict,
@@ -31,6 +42,7 @@ class OrderExecutor:
         equity: float,
         prev_equity: float,
         tilt_locked: bool = False,
+        symbol: str = "BTCUSDT",
     ) -> Optional[dict]:
         """
         Открывает позицию по сигналу с сеткой из 3 лимитных ордеров.
@@ -41,12 +53,13 @@ class OrderExecutor:
             equity: текущий капитал
             prev_equity: предыдущий пиковый капитал
             tilt_locked: заблокирован ли TiltGuard
+            symbol: торговый инструмент
 
         Returns:
             dict с деталями позиции или None при ошибке/блокировке
         """
         if tilt_locked:
-            logger.warning("Открытие позиции заблокировано: TILT LOCK активен")
+            logger.warning(f"Открытие позиции [{symbol}] заблокировано: TILT LOCK активен")
             return None
 
         # Проверка revenge trading (просадка > 3%)
@@ -55,7 +68,7 @@ class OrderExecutor:
             if drawdown > 0.03:
                 logger.warning(
                     f"Anti-revenge: просадка {drawdown:.1%} > 3%, "
-                    f"открытие позиции заблокировано"
+                    f"открытие позиции [{symbol}] заблокировано"
                 )
                 return None
 
@@ -70,26 +83,30 @@ class OrderExecutor:
         leverage = risk.get("leverage", 1)
 
         if qty <= 0:
-            logger.error("Невалидный размер позиции: qty <= 0")
+            logger.error(f"[{symbol}] Невалидный размер позиции: qty <= 0")
             return None
 
         # Получаем текущую цену
-        current_price = await self._get_current_price()
+        current_price = await self._get_current_price(symbol)
         if current_price is None:
-            logger.error("Не удалось получить текущую цену")
+            logger.error(f"[{symbol}] Не удалось получить текущую цену")
             return None
 
         # Расчёт слиппеджа
-        slippage = await self.estimate_slippage(qty)
+        slippage = await self.estimate_slippage(qty, symbol)
 
-        # Define the price step between grid orders (0.1%)
-        price_step = 0.001
+        # Получаем правила округления для конкретного символа
+        rules = self.get_precision_rules(symbol)
+        min_qty = rules["min_qty"]
+        round_qty = rules["round_qty"]
+        round_price = rules["round_price"]
+        price_step = rules["price_step"]
 
         # Determine if we should split based on Binance minimum limits
-        if qty < 0.004:
+        if qty < 4 * min_qty:
             prices = [current_price]
             order_splits = [1.0]
-            logger.info("Position size is small (qty < 0.004 BTC). Skipping grid splitting to avoid LOT_SIZE inflation.")
+            logger.info(f"Position size is small (qty < {4 * min_qty} {symbol}). Skipping grid splitting to avoid LOT_SIZE inflation.")
             if side == "BUY":
                 stop_price = current_price - stop_dist
                 target_price = current_price + target_dist
@@ -112,16 +129,15 @@ class OrderExecutor:
         rollback_triggered = False
 
         for i, (price, split) in enumerate(zip(prices, order_splits)):
-            # Enforce Binance minimum lot size (0.001 BTC) and format to 3 decimal places
             if split == 1.0:
-                sub_qty = max(0.001, round(qty, 3))
+                sub_qty = max(min_qty, round(qty, round_qty))
             else:
-                sub_qty = max(0.001, round(qty * split, 3))
+                sub_qty = max(min_qty, round(qty * split, round_qty))
             
             order = {
                 "id": f"apex_{int(time.time())}_{i}",
                 "side": side,
-                "price": round(price, 2),
+                "price": round(price, round_price),
                 "qty": sub_qty,
                 "type": "LIMIT",
                 "status": "PENDING",
@@ -134,30 +150,31 @@ class OrderExecutor:
                 try:
                     order_id = await self.exchange.place_limit(
                         side=side.lower(),
-                        price=price,
+                        price=round(price, round_price),
                         qty=sub_qty,
+                        symbol=symbol
                     )
                     order["exchange_id"] = order_id
                     order["status"] = "PLACED"
                     placed_orders.append(order)
                 except Exception as e:
-                    logger.error(f"Ошибка выставления ордера {order['id']}: {e}")
+                    logger.error(f"Ошибка выставления ордера {order['id']} для {symbol}: {e}")
                     order["status"] = "ERROR"
                     order["error"] = str(e)
                     rollback_triggered = True
                     break
             else:
-                raise RuntimeError("Binance Futures Exchange Client is not connected! Cannot place orders in Combat mode.")
+                raise RuntimeError(f"Binance Futures Exchange Client is not connected! Cannot place orders in Combat mode for {symbol}.")
 
         # Запуск процедуры отката (rollback) в случае сбоя частичного размещения сетки
         if rollback_triggered:
-            logger.warning("Запуск процедуры отката (rollback) для частично выставленной сетки...")
+            logger.warning(f"Запуск процедуры отката (rollback) для частично выставленной сетки {symbol}...")
             for p_order in placed_orders:
                 exchange_id = p_order.get("exchange_id")
                 if exchange_id:
                     try:
                         logger.info(f"Отмена ранее выставленного субордера: {exchange_id}")
-                        await self.exchange.cancel_order(exchange_id)
+                        await self.exchange.cancel_order(exchange_id, symbol=symbol)
                     except Exception as cancel_err:
                         logger.error(f"Не удалось отменить субордер {exchange_id} при откате: {cancel_err}")
             return None
@@ -173,11 +190,11 @@ class OrderExecutor:
         # Формируем позицию
         position = {
             "id": f"pos_{int(time.time())}",
-            "symbol": "BTCUSDT",
+            "symbol": symbol,
             "side": action,
             "entry_price": current_price,
-            "stop_loss": round(stop_price, 2),
-            "take_profit": round(target_price, 2),
+            "stop_loss": round(stop_price, round_price),
+            "take_profit": round(target_price, round_price),
             "qty": qty,
             "leverage": leverage,
             "slippage_est": round(slippage, 4),
@@ -191,7 +208,7 @@ class OrderExecutor:
         self.active_orders.extend(orders)
 
         logger.info(
-            f"Позиция открыта: {action} {qty:.6f} BTC @ {current_price:.2f}, "
+            f"Позиция открыта: {action} {qty:.6f} {symbol} @ {current_price:.2f}, "
             f"SL={stop_price:.2f}, TP={target_price:.2f}, leverage={leverage}x"
         )
 
@@ -220,7 +237,8 @@ class OrderExecutor:
             logger.warning(f"Позиция {position_id} не найдена")
             return None
 
-        current_price = await self._get_current_price()
+        symbol = position.get("symbol", "BTCUSDT")
+        current_price = await self._get_current_price(symbol)
         entry_price = position["entry_price"]
         qty = position["qty"]
         side = position["side"]
@@ -247,12 +265,13 @@ class OrderExecutor:
                 if order["status"] in ("PENDING", "PLACED"):
                     try:
                         await self.exchange.cancel_order(
-                            order.get("exchange_id", order["id"])
+                            order.get("exchange_id", order["id"]),
+                            symbol=symbol
                         )
                     except Exception as e:
                         logger.warning(f"Ошибка отмены ордера: {e}")
         else:
-            raise RuntimeError("Binance Futures Exchange Client is not connected! Cannot cancel orders in Combat mode.")
+            raise RuntimeError(f"Binance Futures Exchange Client is not connected! Cannot cancel orders in Combat mode for {symbol}.")
 
         logger.info(
             f"Позиция закрыта: {position_id}, PnL={pnl:+.2f} ({pnl_pct:+.1f}%), "
@@ -261,21 +280,22 @@ class OrderExecutor:
 
         return position
 
-    async def estimate_slippage(self, qty: float) -> float:
+    async def estimate_slippage(self, qty: float, symbol: str = "BTCUSDT") -> float:
         """
         Оценивает слиппедж по глубине стакана.
 
         Args:
-            qty: размер ордера в BTC
+            qty: размер ордера в монете
+            symbol: торговый инструмент
 
         Returns:
             Оценка слиппеджа в USD
         """
         if not self.exchange:
-            raise RuntimeError("Binance Futures Exchange Client is not connected! Cannot estimate slippage.")
+            raise RuntimeError(f"Binance Futures Exchange Client is not connected! Cannot estimate slippage for {symbol}.")
 
         try:
-            orderbook = await self.exchange.get_orderbook("BTCUSDT")
+            orderbook = await self.exchange.get_orderbook(symbol)
             asks = orderbook.get("asks", [])
 
             if not asks:
@@ -300,19 +320,19 @@ class OrderExecutor:
             return 0.0
 
         except Exception as e:
-            logger.warning(f"Ошибка расчёта слиппеджа: {e}")
+            logger.warning(f"Ошибка расчёта слиппеджа для {symbol}: {e}")
             return 0.0
 
-    async def _get_current_price(self) -> Optional[float]:
-        """Получает текущую цену BTC."""
+    async def _get_current_price(self, symbol: str = "BTCUSDT") -> Optional[float]:
+        """Получает текущую цену указанного символа."""
         if self.exchange:
             try:
-                return await self.exchange.get_price("BTCUSDT")
+                return await self.exchange.get_price(symbol)
             except Exception as e:
-                logger.warning(f"Ошибка получения цены: {e}")
+                logger.warning(f"Ошибка получения цены для {symbol}: {e}")
                 return None
 
-        raise RuntimeError("Binance Futures Exchange Client is not connected! Cannot operate in Combat mode.")
+        raise RuntimeError(f"Binance Futures Exchange Client is not connected! Cannot operate in Combat mode for {symbol}.")
 
     def get_active_positions(self) -> list[dict]:
         """Возвращает список активных позиций."""

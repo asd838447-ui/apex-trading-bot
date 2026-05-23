@@ -658,3 +658,48 @@ body::before {
   height: 20px;
   background: var(--border-subtle);
 }
+
+/* ---------- Premium Multi-Asset Tabs ---------- */
+.tabs-container {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  padding: 6px;
+  border-radius: var(--radius-xl);
+  width: fit-content;
+  box-shadow: var(--shadow-md);
+  margin-bottom: var(--space-xs);
+  z-index: 10;
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 8px 18px;
+  border-radius: var(--radius-lg);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  user-select: none;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tab-btn.active {
+  color: var(--text-primary);
+  background: rgba(0, 212, 255, 0.12);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.15);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  transform: scale(1.02);
+}

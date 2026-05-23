@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Activity, Wifi, WifiOff, Zap, Clock } from 'lucide-react';
 
 export default function Header({
+  prices = {},
   btcPrice,
   isConnected,
   systemStatus,
@@ -12,8 +13,13 @@ export default function Header({
   ticksPerSecond = 0
 }) {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [priceColor, setPriceColor] = useState('var(--text)');
-  const prevPriceRef = useRef(btcPrice);
+  
+  const [priceColors, setPriceColors] = useState({
+    BTCUSDT: 'var(--text-primary)',
+    ETHUSDT: 'var(--text-primary)',
+    SOLUSDT: 'var(--text-primary)',
+  });
+  const prevPricesRef = useRef({ BTCUSDT: 0.0, ETHUSDT: 0.0, SOLUSDT: 0.0 });
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -21,33 +27,37 @@ export default function Header({
   }, []);
 
   useEffect(() => {
-    if (btcPrice > 0) {
-      if (btcPrice > prevPriceRef.current) {
-        setPriceColor('var(--emerald)');
-        const t = setTimeout(() => setPriceColor('var(--text-primary)'), 500);
-        return () => clearTimeout(t);
-      } else if (btcPrice < prevPriceRef.current) {
-        setPriceColor('var(--rose)');
-        const t = setTimeout(() => setPriceColor('var(--text-primary)'), 500);
-        return () => clearTimeout(t);
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+    let changed = false;
+    const nextColors = { ...priceColors };
+
+    symbols.forEach((symbol) => {
+      const price = prices[symbol] || (symbol === 'BTCUSDT' ? btcPrice : 0.0);
+      const prevPrice = prevPricesRef.current[symbol];
+
+      if (price > 0 && prevPrice > 0 && price !== prevPrice) {
+        nextColors[symbol] = price > prevPrice ? 'var(--emerald)' : 'var(--rose)';
+        changed = true;
+
+        setTimeout(() => {
+          setPriceColors((prev) => ({ ...prev, [symbol]: 'var(--text-primary)' }));
+        }, 500);
       }
-      prevPriceRef.current = btcPrice;
+      if (price > 0) {
+        prevPricesRef.current[symbol] = price;
+      }
+    });
+
+    if (changed) {
+      setPriceColors(nextColors);
     }
-  }, [btcPrice]);
+  }, [prices, btcPrice]);
 
   const formatTime = (d) =>
     d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
   const formatDate = (d) =>
     d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-  const priceFormatted = typeof btcPrice === 'number' && btcPrice > 0
-    ? btcPrice.toLocaleString('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2,
-      })
-    : '—';
 
   const feedLabels = {
     binanceFutures: 'Binance Fut',
@@ -72,22 +82,34 @@ export default function Header({
         </div>
       </div>
 
-      {/* Center: BTC Price + Multi-Feed Panel */}
+      {/* Center: Multi-Asset Prices + Multi-Feed Panel */}
       <div style={styles.centerSection}>
-        <div style={styles.priceBlock}>
-          <span style={styles.priceLabel}>
-            BTC/USDT 
-            <span style={{
-              ...styles.sourceBadge,
-              boxShadow: lastActiveSource !== 'Local Server' ? '0 0 8px rgba(0, 212, 255, 0.2)' : 'none',
-              borderColor: lastActiveSource !== 'Local Server' ? 'rgba(0, 212, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)',
-              background: lastActiveSource !== 'Local Server' ? 'rgba(0, 212, 255, 0.08)' : 'rgba(255, 255, 255, 0.04)',
-              color: lastActiveSource !== 'Local Server' ? 'var(--cyan)' : 'var(--text-muted)'
-            }}>
-              {lastActiveSource.toUpperCase()}
-            </span>
-          </span>
-          <span className="mono" style={{ ...styles.priceValue, color: priceColor, transition: 'color 0.15s ease' }}>{priceFormatted}</span>
+        <div style={styles.pricesRow}>
+          {['BTCUSDT', 'ETHUSDT', 'SOLUSDT'].map((symbol) => {
+            const price = prices[symbol] || (symbol === 'BTCUSDT' ? btcPrice : 0.0);
+            const formattedPrice = typeof price === 'number' && price > 0
+              ? price.toLocaleString('en-US', {
+                  style: 'currency',
+                  currency: 'USD',
+                  minimumFractionDigits: symbol === 'SOLUSDT' ? 3 : 2,
+                })
+              : '—';
+
+            return (
+              <div key={symbol} style={styles.priceBlockCompact}>
+                <span style={styles.priceLabelCompact}>
+                  {symbol.replace('USDT', '')}/USDT
+                </span>
+                <span className="mono" style={{ 
+                  ...styles.priceValueCompact, 
+                  color: priceColors[symbol], 
+                  transition: 'color 0.15s ease' 
+                }}>
+                  {formattedPrice}
+                </span>
+              </div>
+            );
+          })}
         </div>
 
         <div className="divider" />
@@ -394,5 +416,32 @@ const styles = {
     fontSize: '10px',
     color: 'var(--text-muted)',
     lineHeight: 1.2,
+  },
+  pricesRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '20px',
+  },
+  priceBlockCompact: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    minWidth: '100px',
+    background: 'rgba(255, 255, 255, 0.01)',
+    border: '1px solid rgba(255, 255, 255, 0.03)',
+    borderRadius: '8px',
+    padding: '4px 10px',
+  },
+  priceLabelCompact: {
+    fontSize: '10px',
+    color: 'var(--text-muted)',
+    fontWeight: 600,
+    letterSpacing: '0.04em',
+  },
+  priceValueCompact: {
+    fontSize: 'var(--text-md)',
+    fontWeight: 700,
+    color: 'var(--text-primary)',
+    letterSpacing: '-0.01em',
   },
 };

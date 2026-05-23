@@ -80,6 +80,9 @@ class Settings:
     PROXY_URL: str = field(
         default_factory=lambda: _env("PROXY_URL", "")
     )
+    SUPPORTED_SYMBOLS: list[str] = field(
+        default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    )
 
     # ── Glassnode ───────────────────────────────────────────────────────
     GLASSNODE_API_KEY: str = field(

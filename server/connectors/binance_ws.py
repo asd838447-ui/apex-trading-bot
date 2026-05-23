@@ -11,7 +11,9 @@ from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-# Стримы для BTC/USDT Futures
+from server.config import settings
+
+# Стримы для BTC/USDT Futures (дефолтные)
 STREAMS = [
     "btcusdt@aggTrade",    # Тиковые сделки (для CVD)
     "btcusdt@kline_15m",   # Свечи 15M
@@ -42,22 +44,44 @@ class BinanceWSConnector:
         self._on_candle: Optional[Callable] = None
         self._on_error: Optional[Callable] = None
 
-        # Кеш текущих данных
-        self.current_price: float = 0.0
+        # Кеш текущих данных по всем парам
+        self.current_prices: dict[str, float] = {symbol: 0.0 for symbol in settings.SUPPORTED_SYMBOLS}
+        self.current_price: float = 0.0  # Для обратной совместимости (BTCUSDT)
         self.orderbook: dict = {"bids": [], "asks": []}
-        self.latest_candles: dict = {}
+        self.latest_candles: dict = {symbol: {} for symbol in settings.SUPPORTED_SYMBOLS}
+
+        # Динамическое построение стримов
+        streams = []
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            sym_lower = symbol.lower()
+            streams.extend([
+                f"{sym_lower}@aggTrade",
+                f"{sym_lower}@kline_15m",
+                f"{sym_lower}@kline_4h",
+                f"{sym_lower}@kline_1d"
+            ])
+        
+        # Динамические подписки для Bybit
+        bybit_args = []
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            bybit_args.extend([
+                f"publicTrade.{symbol}",
+                f"kline.15.{symbol}",
+                f"kline.240.{symbol}",
+                f"kline.D.{symbol}"
+            ])
 
         # Резервные эндпоинты
         self.endpoints = [
             {
                 "name": "Binance Futures WS",
                 "type": "binance",
-                "url": BASE_URL + "/".join(STREAMS)
+                "url": BASE_URL + "/".join(streams)
             },
             {
                 "name": "Binance Spot WS",
                 "type": "binance",
-                "url": "wss://stream.binance.com:9443/stream?streams=" + "/".join(STREAMS)
+                "url": "wss://stream.binance.com:9443/stream?streams=" + "/".join(streams)
             },
             {
                 "name": "Bybit Public WS",
@@ -65,7 +89,7 @@ class BinanceWSConnector:
                 "url": "wss://stream.bybit.com/v5/public/linear",
                 "subscribe": {
                     "op": "subscribe",
-                    "args": ["publicTrade.BTCUSDT", "kline.15.BTCUSDT", "kline.240.BTCUSDT", "kline.D.BTCUSDT"]
+                    "args": bybit_args
                 }
             }
         ]
@@ -164,21 +188,25 @@ class BinanceWSConnector:
             return
 
         if "publicTrade" in topic:
+            symbol = topic.split(".")[-1]
             for t in payload:
                 tick = {
                     "time": int(t.get("T", time.time() * 1000)),
-                    "symbol": "BTCUSDT",
+                    "symbol": symbol,
                     "price": float(t.get("p", 0)),
                     "qty": float(t.get("v", 0)),
                     "is_buyer": t.get("S", "Buy") == "Buy",
                 }
-                self.current_price = tick["price"]
+                self.current_prices[symbol] = tick["price"]
+                if symbol == "BTCUSDT":
+                    self.current_price = tick["price"]
                 if self._on_tick:
                     try:
                         await self._on_tick(tick)
                     except Exception as e:
                         logger.error(f"Ошибка в tick callback (Bybit): {e}")
         elif "kline" in topic:
+            symbol = topic.split(".")[-1]
             for k in payload:
                 bybit_tf = k.get("interval", "15")
                 tf_map = {"15": "15m", "240": "4h", "D": "1d"}
@@ -186,7 +214,7 @@ class BinanceWSConnector:
                 
                 candle = {
                     "time": int(k.get("start", 0)),
-                    "symbol": "BTCUSDT",
+                    "symbol": symbol,
                     "tf": tf,
                     "open": float(k.get("open", 0)),
                     "high": float(k.get("high", 0)),
@@ -195,7 +223,9 @@ class BinanceWSConnector:
                     "volume": float(k.get("volume", 0)),
                     "is_closed": k.get("confirm", False),
                 }
-                self.latest_candles[tf] = candle
+                if symbol not in self.latest_candles:
+                    self.latest_candles[symbol] = {}
+                self.latest_candles[symbol][tf] = candle
                 if self._on_candle:
                     try:
                         await self._on_candle(candle)
@@ -220,7 +250,10 @@ class BinanceWSConnector:
             "qty": float(data.get("q", 0)),
             "is_buyer": data.get("m", False) is False,  # m=true значит seller
         }
-        self.current_price = tick["price"]
+        symbol = tick["symbol"]
+        self.current_prices[symbol] = tick["price"]
+        if symbol == "BTCUSDT":
+            self.current_price = tick["price"]
 
         if self._on_tick:
             try:
@@ -262,7 +295,10 @@ class BinanceWSConnector:
             "volume": float(kline.get("v", 0)),
             "is_closed": kline.get("x", False),
         }
-        self.latest_candles[candle["tf"]] = candle
+        symbol = candle["symbol"]
+        if symbol not in self.latest_candles:
+            self.latest_candles[symbol] = {}
+        self.latest_candles[symbol][candle["tf"]] = candle
 
         if self._on_candle:
             try:
@@ -282,8 +318,18 @@ class BinanceWSConnector:
 
     def get_status(self) -> dict:
         """Возвращает статус подключения."""
+        streams = []
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            sym_lower = symbol.lower()
+            streams.extend([
+                f"{sym_lower}@aggTrade",
+                f"{sym_lower}@kline_15m",
+                f"{sym_lower}@kline_4h",
+                f"{sym_lower}@kline_1d"
+            ])
         return {
             "connected": self.ws is not None and self.running,
+            "current_prices": self.current_prices,
             "current_price": self.current_price,
             "message_count": self.message_count,
             "last_message_age": (
@@ -291,5 +337,5 @@ class BinanceWSConnector:
                 if self.last_message_time > 0
                 else None
             ),
-            "streams": STREAMS,
+            "streams": streams,
         }
