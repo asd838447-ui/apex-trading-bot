@@ -30,10 +30,12 @@ class BinanceClient:
         api_key: str = "",
         api_secret: str = "",
         testnet: bool = True,
+        proxy_url: str = "",
     ):
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = FUTURES_TESTNET_URL if testnet else FUTURES_BASE_URL
+        self.proxy_url = proxy_url
         self.session: Optional[aiohttp.ClientSession] = None
         self.recv_window = 5000
         self.time_offset = 0
@@ -45,7 +47,8 @@ class BinanceClient:
             return
         try:
             url = f"{self.base_url}/fapi/v1/time"
-            async with self.session.get(url) as response:
+            proxy = self.proxy_url if self.proxy_url else None
+            async with self.session.get(url, proxy=proxy) as response:
                 if response.status == 200:
                     data = await response.json()
                     server_time = data.get("serverTime")
@@ -102,24 +105,25 @@ class BinanceClient:
             params = self._sign(params)
 
         url = f"{self.base_url}{endpoint}"
+        proxy = self.proxy_url if self.proxy_url else None
 
         try:
             if method == "GET":
-                async with self.session.get(url, params=params) as response:
+                async with self.session.get(url, params=params, proxy=proxy) as response:
                     data = await response.json()
                     if response.status != 200:
                         logger.error(f"Binance API error: {data}")
                         raise Exception(f"API error: {data.get('msg', 'Unknown')}")
                     return data
             elif method == "POST":
-                async with self.session.post(url, data=params) as response:
+                async with self.session.post(url, data=params, proxy=proxy) as response:
                     data = await response.json()
                     if response.status != 200:
                         logger.error(f"Binance API error: {data}")
                         raise Exception(f"API error: {data.get('msg', 'Unknown')}")
                     return data
             elif method == "DELETE":
-                async with self.session.delete(url, params=params) as response:
+                async with self.session.delete(url, params=params, proxy=proxy) as response:
                     data = await response.json()
                     if response.status != 200:
                         logger.error(f"Binance API error: {data}")

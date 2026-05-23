@@ -77,6 +77,9 @@ class Settings:
             "BINANCE_WS_URL", "wss://fstream.binance.com/market/stream"
         )
     )
+    PROXY_URL: str = field(
+        default_factory=lambda: _env("PROXY_URL", "")
+    )
 
     # ── Glassnode ───────────────────────────────────────────────────────
     GLASSNODE_API_KEY: str = field(

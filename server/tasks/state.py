@@ -166,6 +166,7 @@ class MarketState:
                 api_key=api_key,
                 api_secret=api_secret,
                 testnet=testnet,
+                proxy_url=settings.PROXY_URL,
             )
             
             # Setup Redis persistence
