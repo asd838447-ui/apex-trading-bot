@@ -11,6 +11,7 @@ import logging
 from typing import List, Optional
 
 import aiohttp
+from server.config import settings
 
 logger = logging.getLogger(__name__)
 
