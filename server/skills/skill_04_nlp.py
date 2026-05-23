@@ -98,11 +98,12 @@ async def fetch_crypto_news() -> List[str]:
 
     try:
         connector = aiohttp.TCPConnector(ssl=False)
+        proxy = settings.PROXY_URL if settings.PROXY_URL else None
         async with aiohttp.ClientSession(connector=connector) as session:
             for url in _NEWS_SOURCES:
                 try:
                     async with session.get(
-                        url, timeout=aiohttp.ClientTimeout(total=10)
+                        url, timeout=aiohttp.ClientTimeout(total=10), proxy=proxy
                     ) as resp:
                         if resp.status != 200:
                             continue

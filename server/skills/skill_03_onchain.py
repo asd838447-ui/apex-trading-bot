@@ -11,6 +11,8 @@ from typing import Any, Dict
 
 import aiohttp
 
+from server.config import settings
+
 logger = logging.getLogger(__name__)
 
 async def fetch_metrics() -> Dict[str, Any]:
@@ -18,10 +20,11 @@ async def fetch_metrics() -> Dict[str, Any]:
     results = {}
     try:
         connector = aiohttp.TCPConnector(ssl=False)
+        proxy = settings.PROXY_URL if settings.PROXY_URL else None
         async with aiohttp.ClientSession(connector=connector) as s:
             # CoinGecko: Fear&Greed proxy + dominance (completely free)
             try:
-                async with s.get('https://api.coingecko.com/api/v3/global', timeout=10) as resp:
+                async with s.get('https://api.coingecko.com/api/v3/global', timeout=10, proxy=proxy) as resp:
                     if resp.status == 200:
                         results['global'] = await resp.json()
                     else:
@@ -32,7 +35,7 @@ async def fetch_metrics() -> Dict[str, Any]:
 
             # Blockchain.com: active addresses (free API, no key)
             try:
-                async with s.get('https://api.blockchain.info/charts/n-unique-addresses?timespan=1days&format=json', timeout=10) as resp:
+                async with s.get('https://api.blockchain.info/charts/n-unique-addresses?timespan=1days&format=json', timeout=10, proxy=proxy) as resp:
                     if resp.status == 200:
                         results['addr'] = await resp.json()
                     else:
