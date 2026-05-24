@@ -69,6 +69,9 @@ class Settings:
     BINANCE_TESTNET: bool = field(
         default_factory=lambda: _env_bool("BINANCE_TESTNET", True)
     )
+    PAPER_TRADING: bool = field(
+        default_factory=lambda: _env_bool("PAPER_TRADING", True)
+    )
     BINANCE_BASE_URL: str = field(
         default_factory=lambda: _env("BINANCE_BASE_URL", "")
     )

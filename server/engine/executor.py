@@ -9,6 +9,8 @@ import logging
 from typing import Optional
 from datetime import datetime, timezone
 
+from server.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +29,7 @@ class OrderExecutor:
     def get_precision_rules(self, symbol: str) -> dict:
         """Возвращает правила округления лота, цены и минимальный лот для каждого инструмента."""
         if symbol == "BTCUSDT":
-            return {"min_qty": 0.001, "round_qty": 3, "round_price": 2, "price_step": 0.001}
+            return {"min_qty": 0.001, "round_qty": 3, "round_price": 1, "price_step": 0.001}
         elif symbol == "ETHUSDT":
             return {"min_qty": 0.01, "round_qty": 3, "round_price": 2, "price_step": 0.001}
         elif symbol == "SOLUSDT":
@@ -106,6 +108,10 @@ class OrderExecutor:
         round_price = rules["round_price"]
         price_step = rules["price_step"]
 
+        # Расчёт дистанции сетки (ATR-based)
+        atr = risk.get("atr", current_price * 0.002)
+        grid_spacing = atr / 3.0
+
         # Determine if we should split based on Binance minimum limits
         if qty < 4 * min_qty:
             prices = [current_price]
@@ -120,11 +126,11 @@ class OrderExecutor:
         else:
             order_splits = [0.40, 0.35, 0.25]
             if side == "BUY":
-                prices = [current_price * (1 - price_step * i) for i in range(3)]
+                prices = [current_price - (grid_spacing * i) for i in range(3)]
                 stop_price = current_price - stop_dist
                 target_price = current_price + target_dist
             else:
-                prices = [current_price * (1 + price_step * i) for i in range(3)]
+                prices = [current_price + (grid_spacing * i) for i in range(3)]
                 stop_price = current_price + stop_dist
                 target_price = current_price - target_dist
 
@@ -150,7 +156,12 @@ class OrderExecutor:
             orders.append(order)
 
             # Выставляем ордер на бирже
-            if self.exchange:
+            if settings.PAPER_TRADING:
+                order["exchange_id"] = f"paper_{order['id']}"
+                # Лимитки симулятора остаются PENDING, пока цена их не пересечет
+                order["status"] = "PENDING"
+                placed_orders.append(order)
+            elif self.exchange:
                 try:
                     order_id = await self.exchange.place_limit(
                         side=side.lower(),
@@ -264,7 +275,11 @@ class OrderExecutor:
         position["closed_at"] = datetime.now(timezone.utc).isoformat()
 
         # Отменяем незаполненные ордера
-        if self.exchange:
+        if settings.PAPER_TRADING:
+            for order in position.get("orders", []):
+                if order["status"] in ("PENDING", "PLACED"):
+                    order["status"] = "CANCELLED"
+        elif self.exchange:
             for order in position.get("orders", []):
                 if order["status"] in ("PENDING", "PLACED"):
                     try:
@@ -337,6 +352,24 @@ class OrderExecutor:
                 return None
 
         raise RuntimeError(f"Binance Futures Exchange Client is not connected! Cannot operate in Combat mode for {symbol}.")
+
+    def simulate_paper_ticks(self, current_price: float, symbol: str):
+        """Эмулирует исполнение бумажных лимитных ордеров при пересечении цены."""
+        if not settings.PAPER_TRADING:
+            return
+            
+        for pos in self.positions:
+            if pos["symbol"] == symbol and pos["status"] == "OPEN":
+                for order in pos.get("orders", []):
+                    if order["status"] == "PENDING":
+                        # Проверяем пересечение лимитки
+                        # Слиппедж уже встроен в цены при генерации
+                        if (order["side"] == "BUY" and current_price <= order["price"]) or \
+                           (order["side"] == "SELL" and current_price >= order["price"]):
+                            order["status"] = "FILLED"
+                            order["filled_at"] = datetime.now(timezone.utc).isoformat()
+                            order["fill_price"] = current_price
+                            logger.info(f"[PAPER TRADING] Лимитный ордер {order['id']} ИСПОЛНЕН по цене {current_price} для {symbol}")
 
     def get_active_positions(self) -> list[dict]:
         """Возвращает список активных позиций."""

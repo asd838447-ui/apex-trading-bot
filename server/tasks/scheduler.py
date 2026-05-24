@@ -7,11 +7,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from datetime import datetime, timezone, timedelta
+from concurrent.futures import ProcessPoolExecutor
 
 from fastapi import FastAPI
-
 import pandas as pd
+
 from server.config import settings
 from server.tasks.state import market_state, parse_klines_to_df
 from server.skills.skill_06_regime import RegimeClassifier
@@ -25,6 +27,15 @@ logger = logging.getLogger(__name__)
 
 # Global instances for real ML and regime classification
 global_regime_classifiers = {symbol: RegimeClassifier() for symbol in settings.SUPPORTED_SYMBOLS}
+
+# CPU pool for heavy math (HMM fitting) to avoid GIL locking asyncio
+process_pool = ProcessPoolExecutor(max_workers=2)
+
+def cpu_fit_hmm_task(df: pd.DataFrame) -> RegimeClassifier:
+    """Pickleable top-level function for ProcessPoolExecutor"""
+    classifier = RegimeClassifier()
+    classifier.fit(df)
+    return classifier
 
 
 # Global background tasks storage
@@ -42,27 +53,39 @@ async def start_background_tasks(app: FastAPI):
 
     # Fit the HMM Regime Classifier on startup using 500 candles for each symbol
     if market_state.exchange:
+        loop = asyncio.get_running_loop()
+        tasks = []
+        symbols = []
         for symbol in settings.SUPPORTED_SYMBOLS:
             try:
-                logger.info(f"Fitting Gaussian HMM Regime Classifier for {symbol} on startup...")
+                logger.info(f"Fetching klines to fit Gaussian HMM Regime Classifier for {symbol} on startup...")
                 klines = await market_state.exchange.get_klines(symbol, "15m", 500)
                 df_500 = parse_klines_to_df(klines)
-                global_regime_classifiers[symbol].fit(df_500)
-                logger.info(f"  ✓ Gaussian HMM Regime Classifier for {symbol} successfully fitted.")
+                tasks.append(loop.run_in_executor(process_pool, cpu_fit_hmm_task, df_500))
+                symbols.append(symbol)
             except Exception as he:
-                logger.warning(f"Failed to fit HMM Regime Classifier for {symbol} on startup: {he}")
+                logger.warning(f"Failed to prepare HMM fitting for {symbol} on startup: {he}")
+        
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for symbol, res in zip(symbols, results):
+                if isinstance(res, Exception):
+                    logger.warning(f"Failed to fit HMM Regime Classifier for {symbol} on startup: {res}")
+                else:
+                    global_regime_classifiers[symbol] = res
+                    logger.info(f"  ✓ Gaussian HMM Regime Classifier for {symbol} successfully fitted.")
 
-    # 2. Start Binance WebSocket Price Collector (Always started for real-time rates)
+    # 2. Start Binance WebSocket Price Collector
     task_ws = asyncio.create_task(ws_data_collector())
     _background_tasks.append(task_ws)
-    logger.info("  ✓ WebSocket data collector (Binance Live Price) started")
+    logger.info("  ✓ WebSocket data collector started")
 
-    # 3. Core Signal Evaluator (Runs every 60 seconds)
+    # 3. Core Signal Evaluator
     task_signals = asyncio.create_task(signal_evaluator())
     _background_tasks.append(task_signals)
     logger.info("  ✓ Signal evaluator started")
 
-    # 4. Regime Refitter (every 4 hours)
+    # 4. Regime Refitter (Dynamic every 15 mins)
     task_regime = asyncio.create_task(regime_refitter())
     _background_tasks.append(task_regime)
     logger.info("  ✓ Regime refitter started")
@@ -85,6 +108,7 @@ async def stop_background_tasks():
         except asyncio.CancelledError:
             pass
     _background_tasks.clear()
+    process_pool.shutdown(wait=False)
     logger.info("All background tasks stopped")
 
 
@@ -94,7 +118,6 @@ async def ws_data_collector():
     Collects real-time price updates and verifies TP/SL boundaries for active positions.
     """
     try:
-        import time
         from server.connectors.binance_ws import BinanceWSConnector
         from server.api.ws import manager
 
@@ -106,10 +129,8 @@ async def ws_data_collector():
             nonlocal last_broadcast_time
             price = tick["price"]
             symbol = tick["symbol"]
-            # Update live price and monitor if active position crossed TP/SL
             closed_trade = await market_state.update_price(price, symbol=symbol)
             
-            # Broadcast fast price updates to clients with throttling
             now = time.time()
             if now - last_broadcast_time >= broadcast_interval:
                 last_broadcast_time = now
@@ -127,26 +148,13 @@ async def ws_data_collector():
                 except Exception as e:
                     logger.debug(f"Failed to broadcast fast price: {e}")
 
-            # If position was closed, broadcast the updates immediately to all connected UIs
             if closed_trade:
                 logger.info(f"Position closed by market action: {closed_trade['reason']} at {price} for {symbol}")
-                
-                # Broadcast closed trade
-                await manager.broadcast({
-                    "type": "trade_update",
-                    "data": closed_trade
-                })
-                
-                # Broadcast refreshed risk metrics
+                await manager.broadcast({"type": "trade_update", "data": closed_trade})
                 await manager.broadcast({
                     "type": "risk_update",
-                    "data": {
-                        "symbol": symbol,
-                        "metrics": market_state.get_risk_metrics(symbol=symbol)
-                    }
+                    "data": {"symbol": symbol, "metrics": market_state.get_risk_metrics(symbol=symbol)}
                 })
-                
-                # Broadcast refreshed equity details
                 await manager.broadcast({
                     "type": "equity_update",
                     "data": {
@@ -159,7 +167,6 @@ async def ws_data_collector():
                 })
 
         async def on_candle(candle):
-            # Future expansion for raw candle storage
             pass
 
         connector.on_tick(on_tick)
@@ -176,371 +183,269 @@ async def ws_data_collector():
         logger.error(f"WebSocket data collector error: {e}")
 
 
-async def signal_evaluator():
-    """
-    Periodically evaluates trading signals from all skills.
-    Triggers buy/sell entry decisions if no position is currently open.
-    """
+async def evaluate_single_symbol(symbol: str):
+    """Evaluates composite signals for a single symbol."""
     try:
         from server.api.ws import manager
+        await market_state.sync_live_position_if_needed(symbol=symbol)
+
+        timestamp = datetime.now(timezone.utc).isoformat()
         
-        # Sleep briefly on startup to allow WebSocket connection to populate price feed
+        df_15m = pd.DataFrame()
+        df_4h = pd.DataFrame()
+        df_1d = pd.DataFrame()
+        candles = {}
+
+        if market_state.exchange:
+            try:
+                klines_15m = await market_state.exchange.get_klines(symbol, "15m", 100)
+                klines_4h = await market_state.exchange.get_klines(symbol, "4h", 100)
+                klines_1d = await market_state.exchange.get_klines(symbol, "1d", 100)
+                
+                df_15m = parse_klines_to_df(klines_15m)
+                df_4h = parse_klines_to_df(klines_4h)
+                df_1d = parse_klines_to_df(klines_1d)
+                
+                candles = {"15m": df_15m, "4h": df_4h, "1d": df_1d}
+            except Exception as e:
+                logger.error(f"Failed to fetch real klines for {symbol}: {e}")
+
+        # 2. Get Regime Classification (HMM) & ATR Calculation
+        if df_15m is not None and not df_15m.empty:
+            try:
+                current_regime = global_regime_classifiers[symbol].predict(df_15m)
+            except Exception as e:
+                logger.warning(f"Failed to predict regime for {symbol}: {e}")
+                current_regime = "FLAT"
+            
+            try:
+                from server.skills.skill_05_risk import compute_atr
+                market_state.atrs[symbol] = round(compute_atr(df_15m), 2 if symbol != "SOLUSDT" else 3)
+                if symbol == "BTCUSDT":
+                    market_state.current_atr = market_state.atrs["BTCUSDT"]
+            except Exception as ae:
+                logger.warning(f"Failed to calculate ATR in scheduler for {symbol}: {ae}")
+        else:
+            current_regime = "FLAT"
+        
+        market_state.regimes[symbol] = current_regime
+        market_state.regime_confidences[symbol] = round(random.uniform(75.0, 95.0), 1)
+        if symbol == "BTCUSDT":
+            market_state.regime = current_regime
+            market_state.regime_confidence = market_state.regime_confidences["BTCUSDT"]
+        
+        market_state.regime_histories[symbol].append({"time": timestamp, "regime": current_regime})
+        if len(market_state.regime_histories[symbol]) > 24:
+            market_state.regime_histories[symbol] = market_state.regime_histories[symbol][-24:]
+
+        # 3. Calculate votes for the 7 skills
+        trend_sig = 0
+        if candles:
+            try:
+                trend_sig = multitf_composite(candles)
+            except Exception: pass
+        
+        reversion_sig = 0
+        if df_15m is not None and not df_15m.empty:
+            try:
+                close = df_15m["close"]
+                sma = close.rolling(20).mean()
+                std = close.rolling(20).std()
+                upper_band = sma + 2 * std
+                lower_band = sma - 2 * std
+                latest_close = close.iloc[-1]
+                latest_upper = upper_band.iloc[-1]
+                latest_lower = lower_band.iloc[-1]
+                
+                if latest_close <= latest_lower: reversion_sig = 1
+                elif latest_close >= latest_upper: reversion_sig = -1
+            except Exception: pass
+
+        breakout_sig = 0
+        if df_15m is not None and not df_15m.empty:
+            try:
+                highs = df_15m["high"]
+                lows = df_15m["low"]
+                closes = df_15m["close"]
+                if len(closes) >= 21:
+                    prev_high_max = highs.iloc[-21:-1].max()
+                    prev_low_min = lows.iloc[-21:-1].min()
+                    latest_close = closes.iloc[-1]
+                    if latest_close > prev_high_max: breakout_sig = 1
+                    elif latest_close < prev_low_min: breakout_sig = -1
+            except Exception: pass
+
+        volume_sig = 0
+        if df_15m is not None and not df_15m.empty:
+            try:
+                volumes = df_15m["volume"]
+                closes = df_15m["close"]
+                if len(volumes) >= 20:
+                    vol_sma = volumes.rolling(20).mean()
+                    latest_vol = volumes.iloc[-1]
+                    latest_vol_sma = vol_sma.iloc[-1]
+                    if latest_vol > 1.5 * latest_vol_sma:
+                        ret = closes.iloc[-1] - closes.iloc[-2]
+                        if ret > 0: volume_sig = 1
+                        elif ret < 0: volume_sig = -1
+            except Exception: pass
+
+        cvd_sig = 0
+        if market_state.exchange:
+            try:
+                trades = await market_state.exchange._request("GET", "/fapi/v1/aggTrades", {"symbol": symbol, "limit": 1000})
+                ticks = [{"qty": float(t["q"]), "is_buyer": not t["m"]} for t in trades]
+                ticks_df = pd.DataFrame(ticks)
+                cvd = compute_cvd(ticks_df)
+                price_series = pd.Series([float(t["p"]) for t in trades])
+                cvd_sig = cvd_signal(cvd, price_series)
+            except Exception: pass
+
+        if current_regime == "TREND": regime_sig = trend_sig
+        elif current_regime == "FLAT": regime_sig = reversion_sig
+        else: regime_sig = 0
+
+        sentiment_sig = 0
+        sentiment_score = 0.0
+        try:
+            headlines = await fetch_crypto_news(symbol=symbol)
+            sentiment_score = score_texts(headlines)
+            sentiment_sig = nlp_signal(sentiment_score)
+        except Exception: pass
+
+        oc_sig = 0
+        try:
+            metrics = await fetch_metrics()
+            oc_index = onchain_index(metrics)
+            oc_sig = onchain_signal(oc_index)
+        except Exception: pass
+
+        engine = CompositeEngine()
+        
+        prev_equity = market_state.initial_equity
+        if market_state.equity_curve and len(market_state.equity_curve) > 0:
+            prev_equity = market_state.equity_curve[-1]["equity"]
+        
+        drawdown_blocked = market_state.tilt_guard.anti_revenge(
+            equity=market_state.current_equity, prev_equity=prev_equity
+        )
+        
+        eval_res = engine.evaluate(
+            symbol=symbol,
+            signals={1: cvd_sig, 2: trend_sig, 3: oc_sig, 4: sentiment_sig},
+            regime=current_regime,
+            tilt_locked=market_state.tilt_guard.is_locked(),
+            drawdown_blocked=drawdown_blocked
+        )
+
+        action = eval_res["action"]
+        composite_confidence = int(eval_res["confidence"])
+        composite_score = eval_res["raw_score"] * 100.0
+
+        skills = [
+            {"id": 1, "name": "Order Flow", "category": "flow", "weight": engine.get_weight(symbol, 1)*100, "signal": cvd_sig, "confidence": 80 if cvd_sig != 0 else 0, "accuracy": 68.2},
+            {"id": 2, "name": "Multi-TF", "category": "momentum", "weight": engine.get_weight(symbol, 2)*100, "signal": trend_sig, "confidence": 75 if trend_sig != 0 else 0, "accuracy": 64.5},
+            {"id": 3, "name": "On-Chain", "category": "volume", "weight": engine.get_weight(symbol, 3)*100, "signal": oc_sig, "confidence": 70 if oc_sig != 0 else 0, "accuracy": 61.8},
+            {"id": 4, "name": "NLP Sentiment", "category": "sentiment", "weight": engine.get_weight(symbol, 4)*100, "signal": sentiment_sig, "confidence": 65 if sentiment_sig != 0 else 0, "accuracy": 58.5},
+            {"id": 5, "name": "Risk ATR", "category": "reversion", "weight": 12.0, "signal": reversion_sig, "confidence": 60 if reversion_sig != 0 else 0, "accuracy": 63.4},
+            {"id": 6, "name": "Market Regime", "category": "regime", "weight": 8.0, "signal": regime_sig, "confidence": 70 if regime_sig != 0 else 0, "accuracy": 69.5},
+            {"id": 7, "name": "No-Human", "category": "reversion", "weight": 6.0, "signal": -1 if market_state.tilt_guard.is_locked() else 0, "confidence": 95 if market_state.tilt_guard.is_locked() else 0, "accuracy": 72.0}
+        ]
+
+        market_state.multi_signals[symbol] = {
+            "skills": skills,
+            "compositeScore": round(composite_score, 1),
+            "action": action,
+            "confidence": composite_confidence
+        }
+        if symbol == "BTCUSDT":
+            market_state.signals = market_state.multi_signals["BTCUSDT"]
+
+        await manager.broadcast({
+            "type": "signal_update",
+            "data": {"symbol": symbol, "signals": market_state.multi_signals[symbol]}
+        })
+
+        if action in ("LONG", "SHORT") and not market_state.active_positions.get(symbol):
+            new_pos = await market_state.open_position(action, composite_confidence, symbol=symbol)
+            if new_pos:
+                logger.info(f"Signal Evaluator triggered entry for {symbol}: {action} at {market_state.prices.get(symbol)}")
+                await manager.broadcast({
+                    "type": "risk_update",
+                    "data": {"symbol": symbol, "metrics": market_state.get_risk_metrics(symbol=symbol)}
+                })
+                await manager.broadcast({"type": "trade_update", "data": new_pos})
+    except Exception as e:
+        logger.error(f"Error evaluating symbol {symbol}: {e}")
+
+async def signal_evaluator():
+    """Periodically evaluates trading signals from all skills in parallel."""
+    try:
         await asyncio.sleep(5)
-        
         while True:
             try:
-                for symbol in settings.SUPPORTED_SYMBOLS:
-                    # Sync live position status from Binance Futures in real-time
-                    await market_state.sync_live_position_if_needed(symbol=symbol)
-
-                    timestamp = datetime.now(timezone.utc).isoformat()
-                    logger.info(f"Evaluating composite signals for {symbol}: {timestamp}")
-
-                    # 1. Fetch real market data
-                    df_15m = pd.DataFrame()
-                    df_4h = pd.DataFrame()
-                    df_1d = pd.DataFrame()
-                    candles = {}
-
-                    if market_state.exchange:
-                        try:
-                            # Get historical candles
-                            klines_15m = await market_state.exchange.get_klines(symbol, "15m", 100)
-                            klines_4h = await market_state.exchange.get_klines(symbol, "4h", 100)
-                            klines_1d = await market_state.exchange.get_klines(symbol, "1d", 100)
-                            
-                            df_15m = parse_klines_to_df(klines_15m)
-                            df_4h = parse_klines_to_df(klines_4h)
-                            df_1d = parse_klines_to_df(klines_1d)
-                            
-                            candles = {"15m": df_15m, "4h": df_4h, "1d": df_1d}
-                        except Exception as e:
-                            logger.error(f"Failed to fetch real klines for {symbol}: {e}")
-
-                    # 2. Get Regime Classification (HMM) & ATR Calculation
-                    if df_15m is not None and not df_15m.empty:
-                        try:
-                            current_regime = global_regime_classifiers[symbol].predict(df_15m)
-                        except Exception as e:
-                            logger.warning(f"Failed to predict regime for {symbol}: {e}")
-                            current_regime = "FLAT"
-                        
-                        try:
-                            from server.skills.skill_05_risk import compute_atr
-                            market_state.atrs[symbol] = round(compute_atr(df_15m), 2 if symbol != "SOLUSDT" else 3)
-                            if symbol == "BTCUSDT":
-                                market_state.current_atr = market_state.atrs["BTCUSDT"]
-                        except Exception as ae:
-                            logger.warning(f"Failed to calculate ATR in scheduler for {symbol}: {ae}")
-                    else:
-                        current_regime = "FLAT"
-                    
-                    market_state.regimes[symbol] = current_regime
-                    market_state.regime_confidences[symbol] = round(random.uniform(75.0, 95.0), 1)
-                    if symbol == "BTCUSDT":
-                        market_state.regime = current_regime
-                        market_state.regime_confidence = market_state.regime_confidences["BTCUSDT"]
-                    
-                    # Append to regime history
-                    market_state.regime_histories[symbol].append({
-                        "time": timestamp,
-                        "regime": current_regime
-                    })
-                    if len(market_state.regime_histories[symbol]) > 24:
-                        market_state.regime_histories[symbol] = market_state.regime_histories[symbol][-24:]
-
-                    # 3. Calculate votes for the 7 skills:
-                    # Skill 1: Trend Follower (from multitf EMA crossover)
-                    trend_sig = 0
-                    if candles:
-                        try:
-                            trend_sig = multitf_composite(candles)
-                        except Exception as e:
-                            logger.warning(f"Failed to compute trend signal for {symbol}: {e}")
-                    
-                    # Skill 2: Mean Reversion (Bollinger Bands helper)
-                    reversion_sig = 0
-                    if df_15m is not None and not df_15m.empty:
-                        try:
-                            close = df_15m["close"]
-                            sma = close.rolling(20).mean()
-                            std = close.rolling(20).std()
-                            upper_band = sma + 2 * std
-                            lower_band = sma - 2 * std
-                            
-                            latest_close = close.iloc[-1]
-                            latest_upper = upper_band.iloc[-1]
-                            latest_lower = lower_band.iloc[-1]
-                            
-                            if latest_close <= latest_lower:
-                                reversion_sig = 1
-                            elif latest_close >= latest_upper:
-                                reversion_sig = -1
-                            else:
-                                reversion_sig = 0
-                        except Exception as e:
-                            logger.warning(f"Failed to compute mean reversion signal for {symbol}: {e}")
-
-                    # Skill 3: Breakout Hunter
-                    breakout_sig = 0
-                    if df_15m is not None and not df_15m.empty:
-                        try:
-                            highs = df_15m["high"]
-                            lows = df_15m["low"]
-                            closes = df_15m["close"]
-                            
-                            # Lookback 20 for breakouts
-                            if len(closes) >= 21:
-                                prev_high_max = highs.iloc[-21:-1].max()
-                                prev_low_min = lows.iloc[-21:-1].min()
-                                latest_close = closes.iloc[-1]
-                                
-                                if latest_close > prev_high_max:
-                                    breakout_sig = 1
-                                elif latest_close < prev_low_min:
-                                    breakout_sig = -1
-                                else:
-                                    breakout_sig = 0
-                        except Exception as e:
-                            logger.warning(f"Failed to compute breakout signal for {symbol}: {e}")
-
-                    # Skill 4: Volume Profiler
-                    volume_sig = 0
-                    if df_15m is not None and not df_15m.empty:
-                        try:
-                            volumes = df_15m["volume"]
-                            closes = df_15m["close"]
-                            
-                            if len(volumes) >= 20:
-                                vol_sma = volumes.rolling(20).mean()
-                                latest_vol = volumes.iloc[-1]
-                                latest_vol_sma = vol_sma.iloc[-1]
-                                
-                                if latest_vol > 1.5 * latest_vol_sma:
-                                    ret = closes.iloc[-1] - closes.iloc[-2]
-                                    if ret > 0:
-                                        volume_sig = 1
-                                    elif ret < 0:
-                                        volume_sig = -1
-                        except Exception as e:
-                            logger.warning(f"Failed to compute volume signal for {symbol}: {e}")
-
-                    # Skill 5: Order Flow (CVD)
-                    cvd_sig = 0
-                    if market_state.exchange:
-                        try:
-                            trades = await market_state.exchange._request("GET", "/fapi/v1/trades", {"symbol": symbol, "limit": 100})
-                            ticks = []
-                            for t in trades:
-                                ticks.append({
-                                    "qty": float(t["qty"]),
-                                    "is_buyer": not t["isBuyerMaker"]
-                                })
-                            ticks_df = pd.DataFrame(ticks)
-                            cvd = compute_cvd(ticks_df)
-                            price_series = pd.Series([float(t["price"]) for t in trades])
-                            cvd_sig = cvd_signal(cvd, price_series)
-                        except Exception as e:
-                            logger.warning(f"Failed to compute order flow signal for {symbol}: {e}")
-
-                    # Skill 6: Regime Filter vote
-                    if current_regime == "TREND":
-                        regime_sig = trend_sig
-                    elif current_regime == "FLAT":
-                        regime_sig = reversion_sig
-                    else:
-                        regime_sig = 0
-
-                    # Skill 7: Sentiment Gauge (NLP VADER sentiment)
-                    sentiment_sig = 0
-                    sentiment_score = 0.0
-                    try:
-                        headlines = await fetch_crypto_news()
-                        sentiment_score = score_texts(headlines)
-                        sentiment_sig = nlp_signal(sentiment_score)
-                    except Exception as e:
-                        logger.warning(f"Failed to compute sentiment signal for {symbol}: {e}")
-
-                    # On-chain Analytics (used by CompositeEngine)
-                    oc_sig = 0
-                    try:
-                        metrics = await fetch_metrics()
-                        oc_index = onchain_index(metrics)
-                        oc_sig = onchain_signal(oc_index)
-                    except Exception as e:
-                        logger.warning(f"Failed to compute on-chain signal for {symbol}: {e}")
-
-                    # 4. Composite Signal Evaluation using the Engine
-                    engine = CompositeEngine()
-                    
-                    # Check for active drawdown block (anti-revenge)
-                    prev_equity = market_state.initial_equity
-                    if market_state.equity_curve and len(market_state.equity_curve) > 0:
-                        prev_equity = market_state.equity_curve[-1]["equity"]
-                    
-                    drawdown_blocked = market_state.tilt_guard.anti_revenge(
-                        equity=market_state.current_equity,
-                        prev_equity=prev_equity
-                    )
-                    
-                    eval_res = engine.evaluate(
-                        signals={
-                            1: cvd_sig,
-                            2: trend_sig,
-                            3: oc_sig,
-                            4: sentiment_sig
-                        },
-                        regime=current_regime,
-                        tilt_locked=market_state.tilt_guard.is_locked(),
-                        drawdown_blocked=drawdown_blocked
-                    )
-
-                    action = eval_res["action"]
-                    composite_confidence = int(eval_res["confidence"])
-                    composite_score = eval_res["raw_score"] * 100.0
-
-                    # Construct 7 actual skills list aligned with routes.py and App.jsx
-                    skills = [
-                        {
-                            "id": 1,
-                            "name": "Order Flow",
-                            "category": "flow",
-                            "weight": 22.0,
-                            "signal": cvd_sig,
-                            "confidence": 80 if cvd_sig != 0 else 0,
-                            "accuracy": 68.2
-                        },
-                        {
-                            "id": 2,
-                            "name": "Multi-TF",
-                            "category": "momentum",
-                            "weight": 20.0,
-                            "signal": trend_sig,
-                            "confidence": 75 if trend_sig != 0 else 0,
-                            "accuracy": 64.5
-                        },
-                        {
-                            "id": 3,
-                            "name": "On-Chain",
-                            "category": "volume",
-                            "weight": 18.0,
-                            "signal": oc_sig,
-                            "confidence": 70 if oc_sig != 0 else 0,
-                            "accuracy": 61.8
-                        },
-                        {
-                            "id": 4,
-                            "name": "NLP Sentiment",
-                            "category": "sentiment",
-                            "weight": 14.0,
-                            "signal": sentiment_sig,
-                            "confidence": 65 if sentiment_sig != 0 else 0,
-                            "accuracy": 58.5
-                        },
-                        {
-                            "id": 5,
-                            "name": "Risk ATR",
-                            "category": "reversion",
-                            "weight": 12.0,
-                            "signal": reversion_sig,
-                            "confidence": 60 if reversion_sig != 0 else 0,
-                            "accuracy": 63.4
-                        },
-                        {
-                            "id": 6,
-                            "name": "Market Regime",
-                            "category": "regime",
-                            "weight": 8.0,
-                            "signal": regime_sig,
-                            "confidence": 70 if regime_sig != 0 else 0,
-                            "accuracy": 69.5
-                        },
-                        {
-                            "id": 7,
-                            "name": "No-Human",
-                            "category": "reversion",
-                            "weight": 6.0,
-                            "signal": -1 if market_state.tilt_guard.is_locked() else 0,
-                            "confidence": 95 if market_state.tilt_guard.is_locked() else 0,
-                            "accuracy": 72.0
-                        }
-                    ]
-
-                    # Save computed signals to global state
-                    market_state.multi_signals[symbol] = {
-                        "skills": skills,
-                        "compositeScore": round(composite_score, 1),
-                        "action": action,
-                        "confidence": composite_confidence
-                    }
-                    if symbol == "BTCUSDT":
-                        market_state.signals = market_state.multi_signals["BTCUSDT"]
-
-                    # Broadcast new signals to all open WebSocket connections
-                    await manager.broadcast({
-                        "type": "signal_update",
-                        "data": {
-                            "symbol": symbol,
-                            "signals": market_state.multi_signals[symbol]
-                        }
-                    })
-
-                    # 5. If signals suggest entry and we have no active trade, execute entry
-                    if action in ("LONG", "SHORT") and not market_state.active_positions.get(symbol):
-                        new_pos = await market_state.open_position(action, composite_confidence, symbol=symbol)
-                        if new_pos:
-                            logger.info(f"Signal Evaluator triggered entry for {symbol}: {action} at {market_state.prices.get(symbol)}")
-                            
-                            # Broadcast the new position details to UI immediately
-                            await manager.broadcast({
-                                "type": "risk_update",
-                                "data": {
-                                    "symbol": symbol,
-                                    "metrics": market_state.get_risk_metrics(symbol=symbol)
-                                }
-                            })
-                            await manager.broadcast({
-                                "type": "trade_update",
-                                "data": new_pos
-                            })
-
-                # Sleep for 60 seconds before next evaluation
+                logger.info("Evaluating composite signals for all symbols in parallel...")
+                tasks = [evaluate_single_symbol(sym) for sym in settings.SUPPORTED_SYMBOLS]
+                await asyncio.gather(*tasks)
                 await asyncio.sleep(60)
-
             except Exception as e:
                 logger.error(f"Error in signal evaluator iteration: {e}")
                 await asyncio.sleep(60)
-
     except asyncio.CancelledError:
         logger.info("Signal evaluator: Stopped")
 
 
 async def regime_refitter():
     """
-    HMM Regime refitter background thread.
+    Dynamic HMM Regime refitter background thread.
+    Refits every 15 minutes using ProcessPoolExecutor to avoid blocking.
     """
     try:
+        # Wait a bit on startup so we don't instantly refit after startup fit
+        await asyncio.sleep(15 * 60)
         while True:
-            await asyncio.sleep(4 * 3600)  # Every 4 hours
             try:
-                logger.info("Regime refit background process triggered")
-                # HMM re-fitting would happen here
+                logger.info("Dynamic Regime refit background process triggered (15m)")
+                if not market_state.exchange:
+                    await asyncio.sleep(15 * 60)
+                    continue
+
+                loop = asyncio.get_running_loop()
+                tasks = []
+                symbols = []
+                for symbol in settings.SUPPORTED_SYMBOLS:
+                    try:
+                        klines = await market_state.exchange.get_klines(symbol, "15m", 500)
+                        df = parse_klines_to_df(klines)
+                        tasks.append(loop.run_in_executor(process_pool, cpu_fit_hmm_task, df))
+                        symbols.append(symbol)
+                    except Exception as e:
+                        logger.error(f"Failed to fetch klines for refit {symbol}: {e}")
+                
+                if tasks:
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for symbol, res in zip(symbols, results):
+                        if isinstance(res, Exception):
+                            logger.error(f"Refit failed for {symbol}: {res}")
+                        else:
+                            global_regime_classifiers[symbol] = res
+                            logger.info(f"Successfully dynamically refitted HMM for {symbol}")
+                            
             except Exception as e:
                 logger.error(f"Regime refit error: {e}")
+                
+            await asyncio.sleep(15 * 60)
     except asyncio.CancelledError:
         logger.info("Regime refitter: Stopped")
 
 
 async def weight_updater():
-    """
-    Weight updater background thread.
-    """
+    """Weight updater background thread."""
     try:
         while True:
             await asyncio.sleep(7 * 24 * 3600)  # Weekly
             try:
                 logger.info("Skill weight updates triggered")
-                # Accuracy weighting calculations here
             except Exception as e:
                 logger.error(f"Weight updater error: {e}")
     except asyncio.CancelledError:

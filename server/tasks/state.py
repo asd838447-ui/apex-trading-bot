@@ -46,26 +46,27 @@ class MarketState:
 
     def __init__(self):
         # Multi-symbol dictionaries (BTCUSDT, ETHUSDT, SOLUSDT)
-        self.prices: Dict[str, float] = {
+        self.prices: Dict[str, float] = {sym: 0.0 for sym in settings.SUPPORTED_SYMBOLS}
+        self.prices.update({
             "BTCUSDT": 93250.0,
             "ETHUSDT": 3500.0,
-            "SOLUSDT": 150.0
-        }
-        self.price_changes_24h: Dict[str, float] = {
+            "SOLUSDT": 150.0,
+            "HYPEUSDT": 15.0,
+            "TONUSDT": 5.5
+        })
+        self.price_changes_24h: Dict[str, float] = {sym: 0.0 for sym in settings.SUPPORTED_SYMBOLS}
+        self.price_changes_24h.update({
             "BTCUSDT": 1.25,
             "ETHUSDT": 0.8,
             "SOLUSDT": -1.5
-        }
-        self.volumes_24h: Dict[str, float] = {
+        })
+        self.volumes_24h: Dict[str, float] = {sym: 0.0 for sym in settings.SUPPORTED_SYMBOLS}
+        self.volumes_24h.update({
             "BTCUSDT": 38500.0,
             "ETHUSDT": 150000.0,
             "SOLUSDT": 450000.0
-        }
-        self.active_positions: Dict[str, Optional[Dict[str, Any]]] = {
-            "BTCUSDT": None,
-            "ETHUSDT": None,
-            "SOLUSDT": None
-        }
+        })
+        self.active_positions: Dict[str, Optional[Dict[str, Any]]] = {sym: None for sym in settings.SUPPORTED_SYMBOLS}
         
         # Engine indicators for each asset
         def make_default_signals():
@@ -140,32 +141,19 @@ class MarketState:
                 "confidence": 50
             }
         
-        self.multi_signals: Dict[str, Dict[str, Any]] = {
-            "BTCUSDT": make_default_signals(),
-            "ETHUSDT": make_default_signals(),
-            "SOLUSDT": make_default_signals()
-        }
+        self.multi_signals: Dict[str, Dict[str, Any]] = {sym: make_default_signals() for sym in settings.SUPPORTED_SYMBOLS}
+        self.regimes: Dict[str, str] = {sym: "TREND" for sym in settings.SUPPORTED_SYMBOLS}
+        self.regime_confidences: Dict[str, float] = {sym: 80.0 for sym in settings.SUPPORTED_SYMBOLS}
+        self.regime_histories: Dict[str, List[Dict[str, Any]]] = {sym: [] for sym in settings.SUPPORTED_SYMBOLS}
         
-        self.regimes: Dict[str, str] = {
-            "BTCUSDT": "TREND",
-            "ETHUSDT": "TREND",
-            "SOLUSDT": "TREND"
-        }
-        self.regime_confidences: Dict[str, float] = {
-            "BTCUSDT": 85.0,
-            "ETHUSDT": 80.0,
-            "SOLUSDT": 78.0
-        }
-        self.regime_histories: Dict[str, List[Dict[str, Any]]] = {
-            "BTCUSDT": [],
-            "ETHUSDT": [],
-            "SOLUSDT": []
-        }
-        self.atrs: Dict[str, float] = {
+        self.atrs: Dict[str, float] = {sym: 1.0 for sym in settings.SUPPORTED_SYMBOLS}
+        self.atrs.update({
             "BTCUSDT": 1200.0,
             "ETHUSDT": 50.0,
-            "SOLUSDT": 3.5
-        }
+            "SOLUSDT": 3.5,
+            "HYPEUSDT": 0.5,
+            "TONUSDT": 0.2
+        })
         
         self.trades: List[Dict[str, Any]] = []
         self.equity_curve: List[Dict[str, Any]] = []
@@ -466,6 +454,10 @@ class MarketState:
         """
         self.prices[symbol] = price
         
+        # Simulate paper limit fills on every tick
+        if self.executor:
+            self.executor.simulate_paper_ticks(price, symbol)
+            
         async with self._lock:
             pos = self.active_positions.get(symbol)
             if not pos:
@@ -550,14 +542,16 @@ class MarketState:
                     "qty": qty,
                     "stop": stop_dist,
                     "target": target_dist,
-                    "leverage": leverage
+                    "leverage": leverage,
+                    "atr": atr if 'atr' in locals() else current_price * 0.002
                 }
                 try:
                     # Sync leverage on exchange
-                    try:
-                        await self.exchange.set_leverage(leverage, symbol=symbol)
-                    except Exception as le:
-                        logger.warning(f"Failed to set leverage for {symbol} on Binance Futures: {le}")
+                    if not settings.PAPER_TRADING:
+                        try:
+                            await self.exchange.set_leverage(leverage, symbol=symbol)
+                        except Exception as le:
+                            logger.warning(f"Failed to set leverage for {symbol} on Binance Futures: {le}")
                     
                     live_pos = await self.executor.open_position(
                         signal=signal_data,
@@ -646,7 +640,7 @@ class MarketState:
         side = pos["side"]
 
         # --- LIVE EXCHANGE EXECUTION ---
-        if self.exchange:
+        if self.exchange and not settings.PAPER_TRADING:
             logger.info(f"[{symbol}] Executing LIVE close position and cancelling open grid orders on Binance Futures...")
             try:
                 # Place market order to close
@@ -672,6 +666,8 @@ class MarketState:
                     logger.warning(f"Failed to fetch tick price after trade close: {pe}")
             except Exception as e:
                 logger.error(f"Failed to execute live close for {symbol}: {e}")
+        elif settings.PAPER_TRADING:
+            logger.info(f"[{symbol}] Paper Trading: Симуляция закрытия позиции по {exit_price}")
 
         if side == "LONG":
             pnl = (exit_price - entry_price) * qty
@@ -730,7 +726,7 @@ class MarketState:
 
     async def sync_live_position_if_needed(self, symbol: str = "BTCUSDT"):
         """Checks actual position risk on Binance Futures and auto-reconciles if closed."""
-        if not self.exchange or not self.active_positions.get(symbol):
+        if not self.exchange or not self.active_positions.get(symbol) or settings.PAPER_TRADING:
             return
 
         try:
