@@ -81,7 +81,7 @@ class Settings:
         default_factory=lambda: _env("PROXY_URL", "")
     )
     SUPPORTED_SYMBOLS: list[str] = field(
-        default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "HYPEUSDT", "TONUSDT"]
     )
 
     # ── Glassnode ───────────────────────────────────────────────────────

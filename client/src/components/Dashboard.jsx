@@ -5,6 +5,7 @@ import SkillWeights from './SkillWeights';
 import RegimeIndicator from './RegimeIndicator';
 import RiskMonitor from './RiskMonitor';
 import TradeHistory from './TradeHistory';
+import QuantAlphas from './QuantAlphas';
 
 export default function Dashboard({ 
   selectedSymbol, 
@@ -12,6 +13,7 @@ export default function Dashboard({
   multiSignals, 
   multiRisks, 
   multiRegimes, 
+  multiQuantAlphas = {},
   prices, 
   equityCurve, 
   tradeHistory 
@@ -20,11 +22,14 @@ export default function Dashboard({
   const currentSignals = multiSignals[selectedSymbol] || { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 };
   const currentRisk = multiRisks[selectedSymbol] || { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 };
   const currentRegime = multiRegimes[selectedSymbol] || { current: 'FLAT', confidence: 100.0, history: [] };
+  const currentQuantAlphas = multiQuantAlphas[selectedSymbol] || { obi: 0.0, funding_divergence: 0.0 };
 
   const tabs = [
     { id: 'BTCUSDT', label: 'BTC / Биткоин', icon: '₿' },
     { id: 'ETHUSDT', label: 'ETH / Эфириум', icon: 'Ξ' },
-    { id: 'SOLUSDT', label: 'SOL / Солана', icon: '☼' }
+    { id: 'SOLUSDT', label: 'SOL / Солана', icon: '☼' },
+    { id: 'HYPEUSDT', label: 'HYPE / Гипер', icon: '⚡' },
+    { id: 'TONUSDT', label: 'TON / Тон', icon: '💎' }
   ];
 
   return (
@@ -66,9 +71,12 @@ export default function Dashboard({
           <RiskMonitor risk={currentRisk} btcPrice={currentPrice} />
         </div>
 
-        {/* Row 3: Trade History (full width) */}
-        <div className="span-3 animate-slideUp">
+        {/* Row 3: Trade History (span-2) + QuantAlphas (span-1) */}
+        <div className="span-2 animate-slideUp">
           <TradeHistory trades={tradeHistory} />
+        </div>
+        <div className="animate-slideUp">
+          <QuantAlphas metrics={currentQuantAlphas} symbol={selectedSymbol} />
         </div>
       </div>
     </div>

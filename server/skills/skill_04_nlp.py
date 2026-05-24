@@ -86,7 +86,7 @@ def nlp_signal(sentiment_score: float, news_weight: float = 1.0) -> int:
 
 _NEWS_SOURCES = [
     # CryptoPanic free API (no key needed for public feed)
-    "https://cryptopanic.com/api/free/v1/posts/?currencies=BTC&kind=news",
+    "https://cryptopanic.com/api/free/v1/posts/?currencies=BTC,ETH,SOL,HYPE,TON&kind=news",
 ]
 
 

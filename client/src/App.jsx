@@ -23,6 +23,8 @@ export default function App() {
     BTCUSDT: 0.0,
     ETHUSDT: 0.0,
     SOLUSDT: 0.0,
+    HYPEUSDT: 0.0,
+    TONUSDT: 0.0,
   });
   const [selectedSymbol, setSelectedSymbol] = useState('BTCUSDT');
   const [equityCurve, setEquityCurve] = useState([]);
@@ -32,18 +34,32 @@ export default function App() {
     BTCUSDT: { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 },
     ETHUSDT: { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 },
     SOLUSDT: { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 },
+    HYPEUSDT: { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 },
+    TONUSDT: { skills: [], compositeScore: 0.0, action: 'WAIT', confidence: 0 },
   });
   
   const [multiRisks, setMultiRisks] = useState({
     BTCUSDT: { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 },
     ETHUSDT: { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 },
     SOLUSDT: { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 },
+    HYPEUSDT: { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 },
+    TONUSDT: { positionSize: 0.0, leverage: 5, stopLoss: 0.0, takeProfit: 0.0, dailyPnl: 0.0, maxDrawdown: 3.0, riskPerTrade: 1.0, tiltGuard: { active: false, cooldownSec: 0, consecutiveLosses: 0, dailyStops: 0 }, lossStreak: 0 },
   });
 
   const [multiRegimes, setMultiRegimes] = useState({
     BTCUSDT: { current: 'FLAT', confidence: 100.0, history: [] },
     ETHUSDT: { current: 'FLAT', confidence: 100.0, history: [] },
     SOLUSDT: { current: 'FLAT', confidence: 100.0, history: [] },
+    HYPEUSDT: { current: 'FLAT', confidence: 100.0, history: [] },
+    TONUSDT: { current: 'FLAT', confidence: 100.0, history: [] },
+  });
+
+  const [multiQuantAlphas, setMultiQuantAlphas] = useState({
+    BTCUSDT: { obi: 0.0, funding_divergence: 0.0 },
+    ETHUSDT: { obi: 0.0, funding_divergence: 0.0 },
+    SOLUSDT: { obi: 0.0, funding_divergence: 0.0 },
+    HYPEUSDT: { obi: 0.0, funding_divergence: 0.0 },
+    TONUSDT: { obi: 0.0, funding_divergence: 0.0 },
   });
 
   const [botMode, setBotMode] = useState('live');
@@ -63,7 +79,7 @@ export default function App() {
   // Ref to hold tick counter for frequency measurement
   const tickCounterRef = useRef(0);
 
-  const latestPricesRef = useRef({ BTCUSDT: 0.0, ETHUSDT: 0.0, SOLUSDT: 0.0 });
+  const latestPricesRef = useRef({ BTCUSDT: 0.0, ETHUSDT: 0.0, SOLUSDT: 0.0, HYPEUSDT: 0.0, TONUSDT: 0.0 });
   const latestSourceRef = useRef('Local Server');
 
   // Throttled UI updater for high-frequency price data (100ms interval / 10Hz) to prevent browser main-thread choking
@@ -71,7 +87,7 @@ export default function App() {
     const timer = setInterval(() => {
       let changed = false;
       const nextPrices = { ...prices };
-      for (const symbol of ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']) {
+      for (const symbol of ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'TONUSDT']) {
         if (latestPricesRef.current[symbol] !== 0.0 && latestPricesRef.current[symbol] !== prices[symbol]) {
           nextPrices[symbol] = latestPricesRef.current[symbol];
           changed = true;
@@ -108,7 +124,7 @@ export default function App() {
       {
         id: 'binanceFutures',
         name: 'Binance Fut',
-        url: 'wss://fstream.binance.com/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade',
+        url: 'wss://fstream.binance.com/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade/hypeusdt@aggTrade/tonusdt@aggTrade',
         parse: (data) => {
           if (data && data.data && data.data.p && data.data.s) {
             return { symbol: data.data.s, price: parseFloat(data.data.p) };
@@ -119,7 +135,7 @@ export default function App() {
       {
         id: 'binanceSpot',
         name: 'Binance Spot',
-        url: 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade',
+        url: 'wss://stream.binance.com:9443/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade/solusdt@aggTrade/hypeusdt@aggTrade/tonusdt@aggTrade',
         parse: (data) => {
           if (data && data.data && data.data.p && data.data.s) {
             return { symbol: data.data.s, price: parseFloat(data.data.p) };
@@ -131,7 +147,7 @@ export default function App() {
         id: 'bybitFutures',
         name: 'Bybit Fut',
         url: 'wss://stream.bybit.com/v5/public/linear',
-        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT', 'publicTrade.ETHUSDT', 'publicTrade.SOLUSDT'] },
+        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT', 'publicTrade.ETHUSDT', 'publicTrade.SOLUSDT', 'publicTrade.HYPEUSDT', 'publicTrade.TONUSDT'] },
         parse: (data) => {
           if (data && data.topic && data.data && data.data[0]) {
             const parts = data.topic.split('.');
@@ -145,7 +161,7 @@ export default function App() {
         id: 'bybitSpot',
         name: 'Bybit Spot',
         url: 'wss://stream.bybit.com/v5/public/spot',
-        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT', 'publicTrade.ETHUSDT', 'publicTrade.SOLUSDT'] },
+        subscribe: { op: 'subscribe', args: ['publicTrade.BTCUSDT', 'publicTrade.ETHUSDT', 'publicTrade.SOLUSDT', 'publicTrade.HYPEUSDT', 'publicTrade.TONUSDT'] },
         parse: (data) => {
           if (data && data.topic && data.data && data.data[0]) {
             const parts = data.topic.split('.');
@@ -159,7 +175,7 @@ export default function App() {
         id: 'okxSpot',
         name: 'OKX Spot',
         url: 'wss://ws.okx.com:8443/ws/v5/public',
-        subscribe: { op: 'subscribe', args: [{ channel: 'trades', instId: 'BTC-USDT' }, { channel: 'trades', instId: 'ETH-USDT' }, { channel: 'trades', instId: 'SOL-USDT' }] },
+        subscribe: { op: 'subscribe', args: [{ channel: 'trades', instId: 'BTC-USDT' }, { channel: 'trades', instId: 'ETH-USDT' }, { channel: 'trades', instId: 'SOL-USDT' }, { channel: 'trades', instId: 'HYPE-USDT' }, { channel: 'trades', instId: 'TON-USDT' }] },
         parse: (data) => {
           if (data && data.arg && data.data && data.data[0]) {
             const instId = data.arg.instId;
@@ -298,6 +314,11 @@ export default function App() {
           setMultiRisks((prev) => ({ ...prev, BTCUSDT: data }));
         }
         break;
+      case 'quant_alphas_update':
+        if (data.symbol && data.metrics) {
+          setMultiQuantAlphas((prev) => ({ ...prev, [data.symbol]: data.metrics }));
+        }
+        break;
       case 'regime_update':
         if (data.symbol) {
           setMultiRegimes((prev) => ({
@@ -338,6 +359,8 @@ export default function App() {
 
           if (data.multi_regimes) setMultiRegimes(data.multi_regimes);
           else if (data.regime) setMultiRegimes((prev) => ({ ...prev, BTCUSDT: data.regime }));
+
+          if (data.quant_alphas) setMultiQuantAlphas(data.quant_alphas);
 
           if (data.prices) {
             setPrices(data.prices);
@@ -381,6 +404,7 @@ export default function App() {
         multiSignals={multiSignals}
         multiRisks={multiRisks}
         multiRegimes={multiRegimes}
+        multiQuantAlphas={multiQuantAlphas}
         prices={prices}
         equityCurve={equityCurve}
         tradeHistory={tradeHistory}

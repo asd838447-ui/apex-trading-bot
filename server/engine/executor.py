@@ -32,6 +32,10 @@ class OrderExecutor:
             return {"min_qty": 0.01, "round_qty": 3, "round_price": 2, "price_step": 0.001}
         elif symbol == "SOLUSDT":
             return {"min_qty": 0.1, "round_qty": 2, "round_price": 3, "price_step": 0.001}
+        elif symbol == "HYPEUSDT":
+            return {"min_qty": 0.1, "round_qty": 2, "round_price": 3, "price_step": 0.001}
+        elif symbol == "TONUSDT":
+            return {"min_qty": 0.1, "round_qty": 1, "round_price": 4, "price_step": 0.0001}
         else:
             return {"min_qty": 0.001, "round_qty": 3, "round_price": 2, "price_step": 0.001}
 

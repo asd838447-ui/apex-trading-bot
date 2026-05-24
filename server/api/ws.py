@@ -165,6 +165,17 @@ async def ws_endpoint(websocket: WebSocket):
                 },
             })
 
+        # Send quant_alphas for all supported symbols
+        from server.skills.skill_03_onchain import get_quant_alphas
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            await manager.send_personal(websocket, {
+                "type": "quant_alphas_update",
+                "data": {
+                    "symbol": symbol,
+                    "metrics": get_quant_alphas(symbol)
+                },
+            })
+
         # Send equity_update (shared/portfolio level)
         daily_pnl = round(sum(t.get("pnl", 0) or 0 for t in market_state.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d")), 2)
         await manager.send_personal(websocket, {
@@ -249,6 +260,18 @@ async def _send_periodic_updates(websocket: WebSocket):
                         "data": {
                             "symbol": symbol,
                             "metrics": risk_data
+                        },
+                    })
+
+            # 3.5 Обновление количественных метрик (каждые 10 секунд)
+            if now_sec % 10 < 2:
+                from server.skills.skill_03_onchain import get_quant_alphas
+                for symbol in settings.SUPPORTED_SYMBOLS:
+                    await manager.send_personal(websocket, {
+                        "type": "quant_alphas_update",
+                        "data": {
+                            "symbol": symbol,
+                            "metrics": get_quant_alphas(symbol)
                         },
                     })
 

@@ -18,8 +18,10 @@ export default function Header({
     BTCUSDT: 'var(--text-primary)',
     ETHUSDT: 'var(--text-primary)',
     SOLUSDT: 'var(--text-primary)',
+    HYPEUSDT: 'var(--text-primary)',
+    TONUSDT: 'var(--text-primary)',
   });
-  const prevPricesRef = useRef({ BTCUSDT: 0.0, ETHUSDT: 0.0, SOLUSDT: 0.0 });
+  const prevPricesRef = useRef({ BTCUSDT: 0.0, ETHUSDT: 0.0, SOLUSDT: 0.0, HYPEUSDT: 0.0, TONUSDT: 0.0 });
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -27,7 +29,7 @@ export default function Header({
   }, []);
 
   useEffect(() => {
-    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'TONUSDT'];
     let changed = false;
     const nextColors = { ...priceColors };
 
@@ -85,13 +87,13 @@ export default function Header({
       {/* Center: Multi-Asset Prices + Multi-Feed Panel */}
       <div style={styles.centerSection}>
         <div style={styles.pricesRow}>
-          {['BTCUSDT', 'ETHUSDT', 'SOLUSDT'].map((symbol) => {
+          {['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'TONUSDT'].map((symbol) => {
             const price = prices[symbol] || (symbol === 'BTCUSDT' ? btcPrice : 0.0);
             const formattedPrice = typeof price === 'number' && price > 0
               ? price.toLocaleString('en-US', {
                   style: 'currency',
                   currency: 'USD',
-                  minimumFractionDigits: symbol === 'SOLUSDT' ? 3 : 2,
+                  minimumFractionDigits: symbol === 'TONUSDT' ? 4 : (symbol === 'SOLUSDT' || symbol === 'HYPEUSDT' ? 3 : 2),
                 })
               : '—';
 

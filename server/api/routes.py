@@ -21,6 +21,7 @@ from server.api.auth import (
 )
 from server.config import settings
 from server.tasks.state import market_state
+from server.skills.skill_03_onchain import get_quant_alphas
 
 import time
 from collections import defaultdict
@@ -134,6 +135,10 @@ async def get_status():
         },
         "multi_risks": {
             symbol: market_state.get_risk_metrics(symbol=symbol)
+            for symbol in settings.SUPPORTED_SYMBOLS
+        },
+        "quant_alphas": {
+            symbol: get_quant_alphas(symbol)
             for symbol in settings.SUPPORTED_SYMBOLS
         },
         "equity_curve": market_state.equity_curve,
