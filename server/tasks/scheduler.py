@@ -11,6 +11,9 @@ import time
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ProcessPoolExecutor
 
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="aiohttp.connector")
+
 from fastapi import FastAPI
 import pandas as pd
 
@@ -27,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Global instances for real ML and regime classification
 global_regime_classifiers = {symbol: RegimeClassifier() for symbol in settings.SUPPORTED_SYMBOLS}
+nlp_score_history = {symbol: [] for symbol in settings.SUPPORTED_SYMBOLS}
 
 # CPU pool for heavy math (HMM fitting) to avoid GIL locking asyncio
 process_pool = ProcessPoolExecutor(max_workers=2)
@@ -310,7 +314,26 @@ async def evaluate_single_symbol(symbol: str):
         try:
             headlines = await fetch_crypto_news(symbol=symbol)
             sentiment_score = score_texts(headlines)
-            sentiment_sig = nlp_signal(sentiment_score)
+            
+            # Social Momentum Spike detection
+            history = nlp_score_history[symbol]
+            history.append(sentiment_score)
+            if len(history) > 12:  # Keep 12 periods (~12 mins if eval is every 1 min)
+                history.pop(0)
+                
+            if len(history) >= 6:
+                recent_avg = sum(history[-2:]) / 2
+                older_avg = sum(history[:-2]) / len(history[:-2])
+                
+                # Check for > 300% jump
+                if abs(older_avg) > 0.01 and abs(recent_avg) > abs(older_avg) * 3.0:
+                    logger.info(f"[{symbol}] SOCIAL MOMENTUM SPIKE DETECTED! NLP Score jumped from {older_avg:.2f} to {recent_avg:.2f}")
+                    sentiment_sig = 2 if recent_avg > 0 else -2  # Turbo signal
+                else:
+                    sentiment_sig = nlp_signal(sentiment_score)
+            else:
+                sentiment_sig = nlp_signal(sentiment_score)
+                
         except Exception: pass
 
         oc_sig = 0

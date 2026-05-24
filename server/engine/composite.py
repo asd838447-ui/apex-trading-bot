@@ -70,16 +70,20 @@ class CompositeEngine:
             logger.warning("ANTI-REVENGE активен — просадка превышает порог")
             return {"action": "WAIT", "confidence": 0.0, "reason": "ANTI_REVENGE", "regime": regime, "signals_used": {}}
 
+        weights = dict(self.weights_by_symbol.get(symbol, self.weights_by_symbol["BTCUSDT"]))
+        
+        # Social Momentum Dynamic Weighting
+        if signals.get(4, 0) in (2, -2):
+            weights[4] = weights.get(4, 0.1) * 3.0 # Boost NLP weight 3x
+            signals[4] = 1 if signals.get(4, 0) > 0 else -1 # Normalize back for math
+            
         active = set(self.signal_skills)
         if regime == "FLAT":
             active.discard(2)  # Multi-TF менее полезен во флэте
-        if regime == "VOLATILE":
-            active.discard(4)  # NLP может лагать при высокой волатильности, кроме TON
-            if symbol == "TONUSDT":
-                active.add(4) # Для TON мы всегда слушаем новости
+        if regime == "VOLATILE" and signals.get(4, 0) == 0 and symbol not in ("TONUSDT", "HYPEUSDT"):
+            active.discard(4)  # NLP может лагать при высокой волатильности, если нет явных новостей
 
         active_signals = {k: signals.get(k, 0) for k in active}
-        weights = self.weights_by_symbol.get(symbol, self.weights_by_symbol["BTCUSDT"])
 
         total_weight = sum(weights[k] for k in active)
         if total_weight == 0:
