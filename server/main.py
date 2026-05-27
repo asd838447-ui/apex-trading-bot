@@ -1,9 +1,3 @@
-"""
-APEX Trading Bot — FastAPI Main Application Entry Point
-Initializes the web server, mounts API routes, WebSocket endpoint, background tasks scheduler,
-and serves the React SPA from client/dist when built.
-"""
-
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -24,6 +18,8 @@ from server.api.ws import ws_endpoint
 from server.tasks.scheduler import start_background_tasks, stop_background_tasks
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+quant_alphas_data = {}
 
 logging.basicConfig(
     level=logging.getLevelName(settings.LOG_LEVEL),
@@ -72,7 +68,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Database initialization failed: {e}")
 
     logger.info("Starting background tasks...")
-    app.state.quant_alphas_data = {}
+    app.state.quant_alphas_data = quant_alphas_data
     await start_background_tasks(app)
 
     yield
