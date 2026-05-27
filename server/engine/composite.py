@@ -64,11 +64,11 @@ class CompositeEngine:
         """
         if tilt_locked:
             logger.warning("TILT LOCK активен — торговля заблокирована")
-            return {"action": "WAIT", "confidence": 0.0, "reason": "TILT_LOCK", "regime": regime, "signals_used": {}}
+            return {"action": "WAIT", "confidence": 0.0, "reason": "TILT_LOCK", "regime": regime, "signals_used": {}, "raw_score": 0.0, "weights_used": {}}
 
         if drawdown_blocked:
             logger.warning("ANTI-REVENGE активен — просадка превышает порог")
-            return {"action": "WAIT", "confidence": 0.0, "reason": "ANTI_REVENGE", "regime": regime, "signals_used": {}}
+            return {"action": "WAIT", "confidence": 0.0, "reason": "ANTI_REVENGE", "regime": regime, "signals_used": {}, "raw_score": 0.0, "weights_used": {}}
 
         weights = dict(self.weights_by_symbol.get(symbol, self.weights_by_symbol["BTCUSDT"]))
         
@@ -91,6 +91,12 @@ class CompositeEngine:
 
         raw_score = sum(weights[k] * active_signals[k] for k in active)
         confidence = (raw_score / total_weight + 1) / 2 * 100
+
+        # Bear/Bull market regime biases
+        if regime == "BEAR":
+            confidence -= 15.0  # Shift towards SHORT threshold
+        elif regime == "BULL":
+            confidence += 15.0  # Shift towards LONG threshold
 
         if confidence >= CONFIDENCE_THRESHOLD:
             action = "LONG"

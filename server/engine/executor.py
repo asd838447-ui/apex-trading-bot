@@ -68,12 +68,12 @@ class OrderExecutor:
             logger.warning(f"Открытие позиции [{symbol}] заблокировано: TILT LOCK активен")
             return None
 
-        # Проверка revenge trading (просадка > 3%)
+        # Проверка revenge trading (просадка > 5%)
         if prev_equity > 0:
             drawdown = (prev_equity - equity) / prev_equity
-            if drawdown > 0.03:
+            if drawdown > 0.05:
                 logger.warning(
-                    f"Anti-revenge: просадка {drawdown:.1%} > 3%, "
+                    f"Anti-revenge: просадка {drawdown:.1%} > 5%, "
                     f"открытие позиции [{symbol}] заблокировано"
                 )
                 return None

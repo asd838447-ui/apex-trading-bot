@@ -482,6 +482,11 @@ class MarketState:
             logger.warning("TiltGuard: Bot is currently locked out! Aborting open_position.")
             return None
 
+        if self.tilt_guard.anti_revenge(equity=self.current_equity, prev_equity=self.initial_equity):
+            logger.warning("TiltGuard: Daily max drawdown (5%) exceeded! Triggering 24h Circuit Breaker.")
+            self.tilt_guard.lock()
+            return None
+
         async with self._lock:
             if self.active_positions.get(symbol) is not None:
                 return None

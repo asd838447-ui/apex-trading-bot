@@ -40,6 +40,7 @@ class BinanceClient:
         self.recv_window = 5000
         self.time_offset = 0
         self.time_synced = False
+        self.api_key_invalid = False
 
     async def sync_time(self):
         """Синхронизирует время с сервером Binance Futures для компенсации дрифта часов."""
@@ -98,6 +99,8 @@ class BinanceClient:
             params = {}
 
         if signed:
+            if self.api_key_invalid:
+                raise PermissionError("API Key is marked as invalid. Disabling further requests.")
             if not self.api_key or not self.api_secret:
                 raise ValueError(
                     "API key и secret необходимы для подписанных запросов"
@@ -113,6 +116,8 @@ class BinanceClient:
                     data = await response.json()
                     if response.status != 200:
                         logger.error(f"Binance API error: {data}")
+                        if data.get("code") == -2015:
+                            self.api_key_invalid = True
                         raise Exception(f"API error: {data.get('msg', 'Unknown')}")
                     return data
             elif method == "POST":
@@ -120,6 +125,8 @@ class BinanceClient:
                     data = await response.json()
                     if response.status != 200:
                         logger.error(f"Binance API error: {data}")
+                        if data.get("code") == -2015:
+                            self.api_key_invalid = True
                         raise Exception(f"API error: {data.get('msg', 'Unknown')}")
                     return data
             elif method == "DELETE":
@@ -127,6 +134,8 @@ class BinanceClient:
                     data = await response.json()
                     if response.status != 200:
                         logger.error(f"Binance API error: {data}")
+                        if data.get("code") == -2015:
+                            self.api_key_invalid = True
                         raise Exception(f"API error: {data.get('msg', 'Unknown')}")
                     return data
 

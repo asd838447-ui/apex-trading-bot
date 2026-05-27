@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 # ── Thresholds ──────────────────────────────────────────────────────────
 TILT_THRESHOLD: int = 3  # consecutive losses to trigger lock
-TILT_TIMEOUT: int = 21600  # lock duration in seconds (6 hours)
-DAILY_MAX_STOPS: int = 3  # max stop-loss hits per day
-DRAWDOWN_PCT: float = 0.03  # 3 % drawdown triggers anti-revenge
+TILT_TIMEOUT: int = 86400  # lock duration in seconds (24 hours)
+DAILY_MAX_STOPS: int = 5  # max stop-loss hits per day
+DRAWDOWN_PCT: float = 0.05  # 5 % drawdown triggers anti-revenge
 
 
 class TiltGuard:
