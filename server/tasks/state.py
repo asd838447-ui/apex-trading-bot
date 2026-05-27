@@ -529,6 +529,12 @@ class MarketState:
                         stop_loss = round(entry_price - stop_dist, 2 if symbol != "SOLUSDT" else 3)
                         take_profit = round(entry_price + target_dist, 2 if symbol != "SOLUSDT" else 3)
                     else:
+                        # Tighter Stop Loss for Shorts in Bear/Volatile Regimes to avoid squeezes
+                        current_regime = self.regimes.get(symbol, "FLAT")
+                        if current_regime in ["BEAR", "DOWNTREND", "VOLATILE"]:
+                            stop_dist = stop_dist * 0.8  # Tighten Stop Loss by 20%
+                            logger.info(f"[{symbol}] Applying tighter Stop Loss (0.8x) due to {current_regime} regime.")
+                            
                         stop_loss = round(entry_price + stop_dist, 2 if symbol != "SOLUSDT" else 3)
                         take_profit = round(entry_price - target_dist, 2 if symbol != "SOLUSDT" else 3)
                         

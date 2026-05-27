@@ -418,6 +418,12 @@ async def evaluate_single_symbol(symbol: str):
             5: reversion_sig, 6: regime_sig
         }
 
+        # Override eval_res action for aggressive shorting in Bear Market
+        composite_score = eval_res["raw_score"] * 100.0
+        if directional_regime in ["BEAR", "DOWNTREND"] and composite_score < -0.1:
+            eval_res["action"] = "SHORT"
+            eval_res["confidence"] = min(100.0, abs(composite_score) * 100 + market_state.regime_confidences.get(symbol, 50.0) * 0.5)
+
         action = eval_res["action"]
         composite_confidence = int(eval_res["confidence"])
         composite_score = eval_res["raw_score"] * 100.0
