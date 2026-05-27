@@ -25,7 +25,6 @@ from server.tasks.scheduler import start_background_tasks, stop_background_tasks
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-# Setup logging
 logging.basicConfig(
     level=logging.getLevelName(settings.LOG_LEVEL),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -34,10 +33,6 @@ logger = logging.getLogger(__name__)
 
 
 class SPAStaticFiles(StaticFiles):
-    """
-    Custom StaticFiles wrapper that catches 404 errors and falls back to index.html
-    for client-side Single Page Application (SPA) routing.
-    """
     async def get_response(self, path: str, scope) -> FileResponse:
         try:
             return await super().get_response(path, scope)
@@ -51,7 +46,6 @@ class SPAStaticFiles(StaticFiles):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup safety checks
     logger.info("Running system startup validation...")
     
     jwt_secret = settings.JWT_SECRET_KEY
@@ -76,14 +70,13 @@ async def lifespan(app: FastAPI):
         await init_db()
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        # Proceed anyway if fallback DB handles it
 
     logger.info("Starting background tasks...")
+    app.state.quant_alphas_data = {}
     await start_background_tasks(app)
 
     yield
 
-    # Shutdown
     logger.info("Stopping background tasks...")
     await stop_background_tasks()
 
@@ -92,10 +85,6 @@ async def lifespan(app: FastAPI):
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """
-    Middleware that adds vital security headers to block Clickjacking, MIME sniffing,
-    and enforce HSTS / secure referrer policies.
-    """
     async def dispatch(self, request, call_next):
         response: Response = await call_next(request)
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
@@ -117,14 +106,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Register Security Headers middleware
 app.add_middleware(SecurityHeadersMiddleware)
 
-# Enable HTTPS Redirection ONLY when deployed to Render (or when not running locally in debug mode)
 if not settings.DEBUG and os.environ.get("RENDER"):
     app.add_middleware(HTTPSRedirectMiddleware)
 
-# Wire CORS origins
 origins = ["http://localhost:5173", "http://localhost:3000"]
 if settings.CORS_ORIGINS:
     origins.extend([o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()])
@@ -138,11 +124,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount REST API Router
 app.include_router(api_router)
 
 
-# Mount WebSocket Route
 @app.websocket("/ws")
 async def websocket_route(websocket: WebSocket):
     await ws_endpoint(websocket)
@@ -150,12 +134,9 @@ async def websocket_route(websocket: WebSocket):
 
 @app.get("/health")
 async def root_health_check():
-    """Direct, lightweight health check endpoint for Render blueprint routing."""
     return {"status": "ok"}
 
 
-# Serve Static Frontend Files (client/dist) in production/Render environment
-# This allows the backend to host the compiled React app on the same port.
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 client_dist_path = os.path.join(project_root, "client", "dist")
@@ -163,7 +144,6 @@ client_dist_path = os.path.join(project_root, "client", "dist")
 if os.path.exists(client_dist_path):
     logger.info(f"Serving static frontend files from: {client_dist_path}")
     
-    # Mount SPA Static Files at / as the very last route definition
     app.mount("/", SPAStaticFiles(directory=client_dist_path, html=True), name="static")
 else:
     logger.warning(
