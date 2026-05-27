@@ -88,7 +88,7 @@ async def session_scope() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Create all tables defined in the ORM metadata."""
-    from server.db.models import Base  # noqa: local import to avoid circular deps
+    from server.db.models import Base  # noqa: F401
 
     engine = get_engine()
     async with engine.begin() as conn:

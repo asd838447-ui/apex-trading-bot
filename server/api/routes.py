@@ -100,8 +100,10 @@ async def login(request: LoginRequest, http_request: Request):
 
 # === Status ===
 
+from fastapi import Request
+
 @router.get("/status")
-async def get_status():
+async def get_status(request: Request):
     """Статус системы с полным набором данных для инициализации дашборда."""
     # Ensure state has been initialized (e.g. loads from DB)
     await market_state.initialize_if_needed()
@@ -117,6 +119,8 @@ async def get_status():
         "action": "WAIT",
         "confidence": 0
     }
+    
+    quant_alphas_data = getattr(request.app.state, "quant_alphas_data", {})
 
     return {
         "status": "running",

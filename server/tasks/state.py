@@ -548,7 +548,7 @@ class MarketState:
                     "stop": stop_dist,
                     "target": target_dist,
                     "leverage": leverage,
-                    "atr": atr if 'atr' in locals() else current_price * 0.002
+                    "atr": atr if 'atr' in locals() else entry_price * 0.002
                 }
                 try:
                     # Sync leverage on exchange
