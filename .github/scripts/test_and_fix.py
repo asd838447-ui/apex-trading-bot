@@ -49,18 +49,18 @@ def run_local_test():
     except Exception as pe:
         print(f"[WARNING] Не удалось получить эталонную цену с Binance Futures REST API: {pe}")
 
-    # Резолвим проблему с таймаутом старта: опрашиваем сервер в течение 15 секунд,
+    # Резолвим проблему с таймаутом старта: опрашиваем сервер в течение 60 секунд,
     # давая HMM классификатору обучиться, а WebSocket - подключиться и обновить цену.
     server_ready = False
     bot_price = 93250.0
-    for attempt in range(1, 16):
+    for attempt in range(1, 61):
         if process.poll() is not None:
             log_file.close()
-            with open("server_test.log", "r", encoding="utf-8") as f:
+            with open("server_test.log", "r", encoding="utf-8", errors="replace") as f:
                 logs = f.read()
             return False, f"КРИТИЧЕСКАЯ ОШИБКА (Crash). Сервер не запустился:\n{logs}"
             
-        print(f"[INFO] Попытка подключения к серверу и проверки котировок {attempt}/15...")
+        print(f"[INFO] Попытка подключения к серверу и проверки котировок {attempt}/60...")
         try:
             # Делаем GET-запрос к эндпоинту статуса бота
             response = requests.get("http://127.0.0.1:8000/api/status", timeout=2)
@@ -84,13 +84,13 @@ def run_local_test():
         else:
             process.kill()
             log_file.close()
-            with open("server_test.log", "r", encoding="utf-8") as f:
+            with open("server_test.log", "r", encoding="utf-8", errors="replace") as f:
                 logs = f.read()
             
             # Если сервер ответил, но цена осталась статичной/дефолтной
             if bot_price == 93250.0:
                 return False, f"ЛОГИЧЕСКАЯ ОШИБКА. Сервер успешно запущен, но WebSocket-коллектор не обновил цену! Цена осталась дефолтной: ${bot_price:.2f}. Logs:\n{logs}"
-            return False, f"СЕТЕВАЯ ОШИБКА. Сервер не ответил или WebSocket не заработал за 15 секунд.\n\nLogs:\n{logs}"
+            return False, f"СЕТЕВАЯ ОШИБКА. Сервер не ответил или WebSocket не заработал за 60 секунд.\n\nLogs:\n{logs}"
 
     # 3. СВЕРКА ДАННЫХ: Сопоставляем цену в боте с реальной биржевой
     try:
