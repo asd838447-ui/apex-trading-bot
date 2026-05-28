@@ -88,8 +88,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://* wss://*;"
+            "default-src 'self';"
+            " script-src 'self' 'unsafe-inline' 'unsafe-eval';"
+            " style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;"
+            " font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com;"
             " img-src 'self' data: https:;"
+            " connect-src 'self'"
+            " https://fapi.binance.com https://api.binance.com"
+            " https://fstream.binance.com https://stream.binance.com"
+            " wss://fstream.binance.com wss://stream.binance.com wss://stream.binance.com:9443"
+            " wss://stream.bybit.com wss://ws.okx.com wss://ws.okx.com:8443"
+            " https://api.coingecko.com https://api.blockchain.info"
+            " ws://localhost:8000 wss://localhost:8000"
+            " ws: wss:;"
+            " worker-src 'self' blob:;"
         )
         return response
 
