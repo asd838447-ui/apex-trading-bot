@@ -41,6 +41,22 @@ export default function EquityCurve({ data }) {
   const pnlPct = startEquity ? ((pnl / startEquity) * 100) : 0;
   const isPositive = pnl >= 0;
 
+  if (!filtered || filtered.length === 0) {
+    return (
+      <div className="glass-card glow-cyan" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <div className="card-header">
+          <div className="card-title">
+            <TrendingUp />
+            Equity Curve
+          </div>
+        </div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>No equity data yet. Waiting for trades...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="glass-card glow-cyan" style={{ height: '100%' }}>
       <div className="card-header">
