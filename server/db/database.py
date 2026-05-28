@@ -93,7 +93,19 @@ async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables created / verified.")
+        
+        # Safely attempt to add new Deep Brain columns to existing trades table
+        try:
+            from sqlalchemy import text
+            # Ignore errors if columns already exist
+            await conn.execute(text("ALTER TABLE trades ADD COLUMN features_json TEXT"))
+            await conn.execute(text("ALTER TABLE trades ADD COLUMN brain_prediction FLOAT"))
+            await conn.execute(text("ALTER TABLE trades ADD COLUMN brain_reason TEXT"))
+            await conn.execute(text("ALTER TABLE trades ADD COLUMN is_evaluated BOOLEAN DEFAULT FALSE"))
+        except Exception as e:
+            logger.debug(f"Columns might already exist or alter failed: {e}")
+            
+    logger.info("Database tables created / verified / altered.")
 
 
 async def close_db() -> None:

@@ -476,7 +476,7 @@ class MarketState:
         
         return None
 
-    async def open_position(self, side: str, confidence: float, symbol: str = "BTCUSDT") -> Optional[Dict[str, Any]]:
+    async def open_position(self, side: str, confidence: float, symbol: str = "BTCUSDT", features_json: str = "{}", brain_prediction: float = 0.5, brain_reason: str = "") -> Optional[Dict[str, Any]]:
         """Opens a persistent live combat trading position at the current live price."""
         if self.tilt_guard.is_locked():
             logger.warning("TiltGuard: Bot is currently locked out! Aborting open_position.")
@@ -587,7 +587,10 @@ class MarketState:
                         side=side,
                         entry_price=entry_price if not live_pos else live_pos["entry_price"],
                         qty=qty,
-                        status="OPEN"
+                        status="OPEN",
+                        features_json=features_json,
+                        brain_prediction=brain_prediction,
+                        brain_reason=brain_reason
                     )
                     session.add(db_trade)
                     await session.commit()
@@ -604,25 +607,19 @@ class MarketState:
                             "qty": qty,
                             "leverage": leverage,
                             "opened_at": db_trade.time.isoformat(),
-                            "time": db_trade.time.isoformat(),
+                            "time": datetime.now(timezone.utc).isoformat(),
+                            "pnl": 0.0,
+                            "brain_prediction": brain_prediction,
+                            "brain_reason": brain_reason,
                             "status": "OPEN"
                         }
                     else:
-                        pos_details = {
-                            "id": f"pos_{db_trade.id}",
-                            "db_id": db_trade.id,
-                            "symbol": symbol,
-                            "side": side,
-                            "entry_price": live_pos["entry_price"],
-                            "stop_loss": live_pos["stop_loss"],
-                            "take_profit": live_pos["take_profit"],
-                            "qty": live_pos["qty"],
-                            "leverage": leverage,
-                            "opened_at": live_pos["opened_at"],
-                            "time": live_pos["opened_at"],
-                            "status": "OPEN",
-                            "orders": live_pos["orders"]
-                        }
+                        live_pos["id"] = f"pos_{db_trade.id}"
+                        live_pos["db_id"] = db_trade.id
+                        live_pos["brain_prediction"] = brain_prediction
+                        live_pos["brain_reason"] = brain_reason
+                        pos_details = live_pos
+                        pos_details["status"] = "OPEN"
                     
                     self.active_positions[symbol] = pos_details
                     logger.info("[%s] Position tracking initialized: %s", symbol, pos_details)

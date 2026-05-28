@@ -6,6 +6,7 @@ import RegimeIndicator from './RegimeIndicator';
 import RiskMonitor from './RiskMonitor';
 import TradeHistory from './TradeHistory';
 import QuantAlphas from './QuantAlphas';
+import ChatWidget from './ChatWidget';
 
 export default function Dashboard({ 
   selectedSymbol, 
@@ -79,6 +80,8 @@ export default function Dashboard({
           <QuantAlphas metrics={currentQuantAlphas} symbol={selectedSymbol} />
         </div>
       </div>
+
+      <ChatWidget />
     </main>
   );
 }

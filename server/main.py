@@ -64,6 +64,12 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     try:
         await init_db()
+        from server.tasks.state import market_state
+        from server.engine.brain import global_brain
+    
+        await market_state.initialize_if_needed()
+        await global_brain.initialize()
+        logger.info("Market state and Deep Brain initialized.")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
 

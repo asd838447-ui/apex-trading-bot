@@ -26,6 +26,10 @@ hmmlearn==0.3.2
 # NLP (lightweight - no transformers/torch for Render free tier)
 vaderSentiment==3.3.2
 
+# AI Agent
+google-generativeai==0.8.3
+duckduckgo-search==6.2.12
+
 # Exchange connectors
 websockets==12.0
 aiohttp==3.9.3

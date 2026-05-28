@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Brain } from 'lucide-react';
 
 const PAGE_SIZE = 8;
 
@@ -55,6 +55,7 @@ export default function TradeHistory({ trades }) {
     { key: 'exit_price', label: 'Exit' },
     { key: 'pnl', label: 'PnL' },
     { key: 'rr', label: 'R:R' },
+    { key: 'brain', label: 'Brain' },
     { key: 'status', label: 'Status' },
   ];
 
@@ -126,6 +127,16 @@ export default function TradeHistory({ trades }) {
                       {rrVal.toFixed(2)}
                     </span>
                   ) : '—'; })()}
+                </td>
+                <td style={{ textAlign: 'center' }}>
+                  {trade.brain_prediction !== undefined && trade.brain_prediction !== null ? (
+                    <div title={trade.brain_reason || ''} style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center', cursor: 'help' }}>
+                      <Brain size={14} color={trade.brain_prediction >= 0.5 ? 'var(--emerald)' : 'var(--rose)'} />
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {(trade.brain_prediction * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  ) : <span style={{ color: 'var(--text-dim)' }}>—</span>}
                 </td>
                 <td>
                   <span className={`badge badge-${(trade.status || 'OPEN').toLowerCase()}`}>

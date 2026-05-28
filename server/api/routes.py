@@ -66,6 +66,12 @@ class SettingsUpdate(BaseModel):
     confidence_threshold: Optional[float] = None
 
 
+class ChatMessage(BaseModel):
+    message: str
+    is_learning_mode: bool = False
+
+
+
 # === Authentication ===
 
 @router.post("/auth/login", response_model=LoginResponse)
@@ -180,7 +186,25 @@ async def health_check():
             await session.execute(text("SELECT 1"))
         db_status = "connected"
     except Exception as e:
-        logger.error(f"Database health check failed: {e}")
+        logger.error(f"Failed to reset database: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reset database.")
+
+
+# === Chat AI Agent ===
+
+@router.post("/chat")
+async def chat_with_agent(
+    req: ChatMessage
+):
+    """Отправляет сообщение AI-Агенту."""
+    from server.engine.chat_agent import global_chat_agent
+    
+    response_text = await global_chat_agent.send_message(
+        message=req.message,
+        is_learning_mode=req.is_learning_mode
+    )
+    
+    return {"reply": response_text}
         
     # Check Redis
     try:

@@ -98,6 +98,15 @@ class CompositeEngine:
         elif regime == "BULL":
             confidence += 15.0  # Shift towards LONG threshold
 
+        # Apply Chat Agent Manual Insight Bias
+        from server.tasks.state import market_state
+        chat_bias_info = getattr(market_state, 'chat_biases', {}).get(symbol, {})
+        if chat_bias_info:
+            bias_val = chat_bias_info.get("bias", 1.0)
+            # If bias_val is 1.2 (+20%), shift confidence by +20
+            confidence += (bias_val - 1.0) * 100
+            logger.info(f"[{symbol}] Applied Chat Agent Bias: {bias_val} ({chat_bias_info.get('reason')})")
+
         if confidence >= CONFIDENCE_THRESHOLD:
             action = "LONG"
         elif confidence <= (100 - CONFIDENCE_THRESHOLD):

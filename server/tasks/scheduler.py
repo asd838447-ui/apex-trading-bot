@@ -477,8 +477,31 @@ async def evaluate_single_symbol(symbol: str):
             "data": {"symbol": symbol, "signals": market_state.multi_signals[symbol]}
         })
 
+        brain_prediction = 0.5
+        brain_reason = "Brain inactive."
+        features_json = "{}"
+        
         if action in ("LONG", "SHORT") and not market_state.active_positions.get(symbol):
-            new_pos = await market_state.open_position(action, composite_confidence, symbol=symbol)
+            from server.engine.brain import global_brain
+            features = global_brain.extract_features(symbol, last_signals_cache[symbol], market_state)
+            features_json = __import__("json").dumps(features)
+            brain_prediction, brain_reason = global_brain.evaluate_trade(symbol, features)
+            
+            if brain_prediction < 0.5:
+                logger.info(f"Deep Brain blocked {action} on {symbol}. Reason: {brain_reason}")
+                action = "WAIT"
+                market_state.multi_signals[symbol]["action"] = "WAIT"
+                market_state.multi_signals[symbol]["compositeScore"] = 0.0
+
+        if action in ("LONG", "SHORT") and not market_state.active_positions.get(symbol):
+            new_pos = await market_state.open_position(
+                action, 
+                composite_confidence, 
+                symbol=symbol,
+                features_json=features_json,
+                brain_prediction=brain_prediction,
+                brain_reason=brain_reason
+            )
             if new_pos:
                 logger.info(f"Signal Evaluator triggered entry for {symbol}: {action} at {market_state.prices.get(symbol)}")
                 await manager.broadcast({
@@ -561,76 +584,50 @@ async def regime_refitter():
 
 
 async def weight_updater():
-    """Real weight updater: measures per-skill accuracy from recent trades every 4 hours,
-    then calls engine.update_weights() to adapt the bot's decision-making.
-    (FIX BUG #2: was previously a no-op that ran weekly and did nothing)
+    """
+    APEX Deep Brain: Real-time reinforcement learning loop.
+    Iterates over all unevaluated CLOSED trades and feeds them into the SGDClassifier.
     """
     try:
-        await asyncio.sleep(4 * 3600)  # Wait 4 hours on startup
+        await asyncio.sleep(60)  # Wait 1 minute on startup
         while True:
             try:
-                logger.info("=== WEIGHT UPDATER: Computing real skill accuracies from trade history ===")
-                
                 from sqlalchemy import select
                 from server.db.database import session_scope
                 from server.db.models import Trade
+                from server.engine.brain import global_brain
+                import json
                 
-                # Load recent closed trades (last 50)
                 async with session_scope() as session:
-                    stmt = select(Trade).filter(Trade.status == "CLOSED").order_by(Trade.time.desc()).limit(50)
+                    # Find all closed, unevaluated trades
+                    stmt = select(Trade).filter(Trade.status == "CLOSED", Trade.is_evaluated == False).order_by(Trade.time.asc())
                     res = await session.execute(stmt)
-                    recent_trades = res.scalars().all()
-                
-                if len(recent_trades) < 5:
-                    logger.info("WEIGHT UPDATER: Not enough closed trades (%d) to compute real accuracy. Skipping.", len(recent_trades))
-                    await asyncio.sleep(4 * 3600)
-                    continue
-                
-                # For each symbol, compute which skills predicted correctly
-                for symbol in settings.SUPPORTED_SYMBOLS:
-                    sym_trades = [t for t in recent_trades if t.symbol == symbol]
-                    if len(sym_trades) < 3:
-                        continue
+                    unevaluated_trades = res.scalars().all()
                     
-                    wins = sum(1 for t in sym_trades if t.pnl and t.pnl > 0)
-                    total = len(sym_trades)
-                    overall_win_rate = wins / total if total > 0 else 0.5
-                    
-                    # Approximate per-skill accuracy based on:
-                    # - Skills that voted in the direction of winning trades get accuracy boost
-                    # - Skills that voted wrong get accuracy decrease
-                    # We use the cached signals from last_signals_cache as a proxy
-                    cached = last_signals_cache.get(symbol, {})
-                    
-                    performance = {}
-                    for skill_id in range(1, 5):  # Only signal skills 1-4
-                        sig = cached.get(skill_id, 0)
-                        tracker = skill_accuracy_tracker[symbol][skill_id]
+                    if unevaluated_trades:
+                        logger.info(f"=== DEEP BRAIN: Training on {len(unevaluated_trades)} new closed trades ===")
                         
-                        if sig != 0 and total > 0:
-                            # If the skill had a signal, use the overall win rate as a proxy
-                            # (In a more sophisticated system, we'd correlate each signal with each trade outcome)
-                            tracker["total"] += 1
-                            if overall_win_rate > 0.5:
-                                tracker["correct"] += 1
+                        for trade in unevaluated_trades:
+                            if trade.features_json:
+                                try:
+                                    features = json.loads(trade.features_json)
+                                    await global_brain.train_on_trade(
+                                        symbol=trade.symbol,
+                                        features=features,
+                                        pnl=trade.pnl or 0.0
+                                    )
+                                except Exception as parse_e:
+                                    logger.error(f"Failed to parse features for trade {trade.id}: {parse_e}")
+                                    
+                            trade.is_evaluated = True
                             
-                            acc = tracker["correct"] / tracker["total"] if tracker["total"] > 0 else 0.5
-                            performance[skill_id] = acc
-                        else:
-                            performance[skill_id] = 0.5  # Neutral if no signal
-                    
-                    if performance:
-                        new_weights = global_composite_engine.update_weights(symbol, performance)
-                        logger.info(
-                            f"WEIGHT UPDATER [{symbol}]: Win rate={overall_win_rate:.1%}, "
-                            f"New weights={new_weights}"
-                        )
-                
-                logger.info("=== WEIGHT UPDATER: Complete ===")
-                
+                        await session.commit()
+                        await global_brain.save_models()
+                        logger.info("=== DEEP BRAIN: Training Complete ===")
+                        
             except Exception as e:
-                logger.error(f"Weight updater error: {e}", exc_info=True)
+                logger.error(f"Weight updater (Deep Brain) error: {e}", exc_info=True)
             
-            await asyncio.sleep(4 * 3600)  # Run every 4 hours
+            await asyncio.sleep(5 * 60)  # Run every 5 minutes
     except asyncio.CancelledError:
         logger.info("Weight updater: Stopped")

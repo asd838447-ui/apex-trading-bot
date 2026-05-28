@@ -100,6 +100,12 @@ class Trade(Base):
         String(20), nullable=False, default="OPEN"
     )  # OPEN / CLOSED / CANCELLED
 
+    # --- ML Deep Brain fields ---
+    features_json: Mapped[str] = mapped_column(Text, nullable=True)
+    brain_prediction: Mapped[float] = mapped_column(Float, nullable=True)
+    brain_reason: Mapped[str] = mapped_column(Text, nullable=True)
+    is_evaluated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     __table_args__ = (
         Index("ix_trades_symbol_time", "symbol", "time"),
     )
@@ -128,6 +134,21 @@ class SystemState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     key: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class BrainState(Base):
+    """Key-value store for serialized ML brain models (scikit-learn weights)."""
+    __tablename__ = "brain_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, unique=True, index=True)
+    model_data: Mapped[str] = mapped_column(Text, nullable=False) # Base64 encoded joblib dump
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
