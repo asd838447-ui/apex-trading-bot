@@ -176,9 +176,15 @@ async def fetch_crypto_news(symbol: str = "BTCUSDT") -> List[Dict[str, Any]]:
         headlines.extend(await scrape_telegram_channel("DeFiRaccoons", proxy))
         return headlines
 
-    # Default CryptoPanic for BTC, ETH, SOL
+    # Fallback to CoinTelegraph public RSS for BTC, ETH, SOL
     base_asset = symbol.replace("USDT", "")
-    url = f"https://cryptopanic.com/api/free/v1/posts/?currencies={base_asset}&kind=news"
+    asset_to_tag = {
+        "BTC": "bitcoin",
+        "ETH": "ethereum",
+        "SOL": "solana"
+    }
+    tag = asset_to_tag.get(base_asset, "bitcoin")
+    url = f"https://cointelegraph.com/rss/tag/{tag}"
     headers = {"User-Agent": random.choice(USER_AGENTS)}
     
     try:
@@ -187,13 +193,14 @@ async def fetch_crypto_news(symbol: str = "BTCUSDT") -> List[Dict[str, Any]]:
             try:
                 async with session.get(url, timeout=10, proxy=proxy) as resp:
                     if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        results = data.get("results", [])
-                        for item in results[:20]:
-                            title = item.get("title")
+                        text = await resp.text()
+                        # Simple regex to extract <title> tags inside <item> blocks
+                        items = re.findall(r'<item>.*?<title>(.*?)</title>.*?</item>', text, re.IGNORECASE | re.DOTALL)
+                        for title in items[:20]:
+                            # Clean up CDATA if present
+                            title = title.replace('<![CDATA[', '').replace(']]>', '').strip()
                             if title:
-                                # Cryptopanic doesn't easily expose views in free API, assume baseline 1000
-                                headlines.append({"text": title, "views": 1000.0})
+                                headlines.append({"text": title, "views": 5000.0})
             except Exception as exc:
                 logger.debug("News source error (%s): %s", url, exc)
     except Exception as exc:
