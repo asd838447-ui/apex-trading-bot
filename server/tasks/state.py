@@ -60,6 +60,7 @@ class MarketState:
             "ETHUSDT": 0.8,
             "SOLUSDT": -1.5
         })
+        self.obis: Dict[str, float] = {sym: 0.0 for sym in settings.SUPPORTED_SYMBOLS}
         self.volumes_24h: Dict[str, float] = {sym: 0.0 for sym in settings.SUPPORTED_SYMBOLS}
         self.volumes_24h.update({
             "BTCUSDT": 38500.0,

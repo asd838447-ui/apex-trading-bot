@@ -41,7 +41,7 @@ export default function EquityCurve({ data }) {
   const pnlPct = startEquity ? ((pnl / startEquity) * 100) : 0;
   const isPositive = pnl >= 0;
 
-  if (!filtered || filtered.length === 0) {
+  if (!filtered || filtered.length < 2) {
     return (
       <div className="glass-card glow-cyan" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <div className="card-header">

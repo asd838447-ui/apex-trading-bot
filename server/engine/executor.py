@@ -21,6 +21,19 @@ class OrderExecutor:
     """
 
     def __init__(self, exchange_client=None, redis_client=None):
+        import ccxt.async_support as ccxt
+        from server.config import settings
+        self.ccxt_exchange = ccxt.binance({
+            'apiKey': settings.BINANCE_API_KEY,
+            'secret': settings.BINANCE_API_SECRET,
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'future'
+            }
+        })
+        if settings.BINANCE_TESTNET:
+            self.ccxt_exchange.set_sandbox_mode(True)
+            
         self.exchange = exchange_client
         self.redis = redis_client
         self.active_orders: list[dict] = []
@@ -161,19 +174,22 @@ class OrderExecutor:
                 # Лимитки симулятора остаются PENDING, пока цена их не пересечет
                 order["status"] = "PENDING"
                 placed_orders.append(order)
-            elif self.exchange:
+            elif self.ccxt_exchange:
                 try:
-                    order_id = await self.exchange.place_limit(
+                    params = {'timeInForce': 'GTX'} # Post-Only for Maker fee
+                    order_res = await self.ccxt_exchange.create_order(
+                        symbol=symbol,
+                        type='limit',
                         side=side.lower(),
+                        amount=sub_qty,
                         price=round(price, round_price),
-                        qty=sub_qty,
-                        symbol=symbol
+                        params=params
                     )
-                    order["exchange_id"] = order_id
+                    order["exchange_id"] = order_res["id"]
                     order["status"] = "PLACED"
                     placed_orders.append(order)
                 except Exception as e:
-                    logger.error(f"Ошибка выставления ордера {order['id']} для {symbol}: {e}")
+                    logger.error(f"Ошибка выставления ордера {order['id']} для {symbol} через CCXT: {e}")
                     order["status"] = "ERROR"
                     order["error"] = str(e)
                     rollback_triggered = True
@@ -189,7 +205,7 @@ class OrderExecutor:
                 if exchange_id:
                     try:
                         logger.info(f"Отмена ранее выставленного субордера: {exchange_id}")
-                        await self.exchange.cancel_order(exchange_id, symbol=symbol)
+                        await self.ccxt_exchange.cancel_order(exchange_id, symbol=symbol)
                     except Exception as cancel_err:
                         logger.error(f"Не удалось отменить субордер {exchange_id} при откате: {cancel_err}")
             return None
@@ -279,16 +295,16 @@ class OrderExecutor:
             for order in position.get("orders", []):
                 if order["status"] in ("PENDING", "PLACED"):
                     order["status"] = "CANCELLED"
-        elif self.exchange:
+        elif self.ccxt_exchange:
             for order in position.get("orders", []):
                 if order["status"] in ("PENDING", "PLACED"):
                     try:
-                        await self.exchange.cancel_order(
+                        await self.ccxt_exchange.cancel_order(
                             order.get("exchange_id", order["id"]),
                             symbol=symbol
                         )
                     except Exception as e:
-                        logger.warning(f"Ошибка отмены ордера: {e}")
+                        logger.warning(f"Ошибка отмены ордера через CCXT: {e}")
         else:
             raise RuntimeError(f"Binance Futures Exchange Client is not connected! Cannot cancel orders in Combat mode for {symbol}.")
 

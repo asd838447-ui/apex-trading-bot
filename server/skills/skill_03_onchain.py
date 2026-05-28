@@ -111,27 +111,11 @@ async def get_quant_alphas_real(symbol: str, exchange_client=None) -> dict:
     proxy = settings.PROXY_URL if settings.PROXY_URL else None
     
     async with aiohttp.ClientSession(connector=connector) as session:
-        # 1. OBI from orderbook (public endpoint, no API key needed)
+        # 1. OBI from websocket state
         try:
-            if exchange_client and hasattr(exchange_client, 'get_orderbook'):
-                orderbook = await exchange_client.get_orderbook(symbol, limit=20)
-            else:
-                url = f"https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20"
-                async with session.get(url, timeout=5, proxy=proxy) as resp:
-                    if resp.status == 200:
-                        orderbook = await resp.json()
-                    else:
-                        orderbook = {}
-            
-            bids = orderbook.get("bids", [])
-            asks = orderbook.get("asks", [])
-            
-            if bids and asks:
-                bid_volume = sum(float(b[1]) for b in bids[:10])
-                ask_volume = sum(float(a[1]) for a in asks[:10])
-                total = bid_volume + ask_volume
-                if total > 0:
-                    result["obi"] = round((bid_volume - ask_volume) / total, 4)
+            from server.tasks.state import market_state
+            if hasattr(market_state, "obis") and symbol in market_state.obis:
+                result["obi"] = market_state.obis[symbol]
         except Exception as e:
             logger.debug(f"OBI fetch failed for {symbol}: {e}")
         

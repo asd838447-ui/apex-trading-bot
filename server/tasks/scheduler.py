@@ -16,6 +16,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning, module="aiohttp.conne
 
 from fastapi import FastAPI
 import pandas as pd
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from server.config import settings
 from server.tasks.state import market_state, parse_klines_to_df
@@ -58,6 +59,16 @@ def cpu_fit_hmm_task(df: pd.DataFrame) -> RegimeClassifier:
 
 # Global background tasks storage
 _background_tasks: list[asyncio.Task] = []
+_aps_scheduler = AsyncIOScheduler()
+
+async def scheduled_batch_ml():
+    logger.info("=== STARTING SCHEDULED WEEKLY BATCH ML RETRAIN ===")
+    from server.engine.batch_ml import train_batch_models
+    try:
+        await train_batch_models()
+        logger.info("=== FINISHED SCHEDULED BATCH ML RETRAIN ===")
+    except Exception as e:
+        logger.error(f"Batch ML Retrain failed: {e}")
 
 
 async def start_background_tasks(app: FastAPI):
@@ -115,6 +126,11 @@ async def start_background_tasks(app: FastAPI):
 
     logger.info(f"Successfully launched {len(_background_tasks)} background tasks")
 
+    # 6. Start Weekly Batch ML Scheduler
+    _aps_scheduler.add_job(scheduled_batch_ml, 'cron', day_of_week='sun', hour=0, minute=0)
+    _aps_scheduler.start()
+    logger.info("  ✓ APScheduler started (Weekly Batch ML Job scheduled)")
+
 
 async def stop_background_tasks():
     """Cancels and cleans up all running background tasks."""
@@ -126,6 +142,7 @@ async def stop_background_tasks():
         except asyncio.CancelledError:
             pass
     _background_tasks.clear()
+    _aps_scheduler.shutdown(wait=False)
     process_pool.shutdown(wait=False)
     logger.info("All background tasks stopped")
 
@@ -187,8 +204,21 @@ async def ws_data_collector():
         async def on_candle(candle):
             pass
 
+        async def on_orderbook(ob):
+            symbol = ob.get("symbol")
+            if not symbol: return
+            bids = ob.get("bids", [])
+            asks = ob.get("asks", [])
+            if bids and asks:
+                bid_volume = sum(float(b[1]) for b in bids[:10])
+                ask_volume = sum(float(a[1]) for a in asks[:10])
+                total = bid_volume + ask_volume
+                if total > 0:
+                    market_state.obis[symbol] = round((bid_volume - ask_volume) / total, 4)
+
         connector.on_tick(on_tick)
         connector.on_candle(on_candle)
+        connector.on_orderbook(on_orderbook)
 
         logger.info("WebSocket data collector: Connecting to public Binance Futures...")
         await connector.connect()

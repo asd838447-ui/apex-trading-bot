@@ -13,7 +13,7 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - VAULT_ENCRYPTION_KEY=${VAULT_ENCRYPTION_KEY}
       - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=sqlite+aiosqlite:////app/data/apex_combat.db
+      - DATABASE_URL=postgresql+asyncpg://apex_user:apex_password@postgres:5432/apex_db
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -22,6 +22,20 @@ services:
       - bot-data:/app/data
     depends_on:
       - redis
+      - postgres
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: apex-postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=apex_user
+      - POSTGRES_PASSWORD=apex_password
+      - POSTGRES_DB=apex_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
@@ -34,3 +48,4 @@ services:
 volumes:
   bot-data:
   redis-data:
+  postgres-data:

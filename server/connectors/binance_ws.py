@@ -58,7 +58,8 @@ class BinanceWSConnector:
                 f"{sym_lower}@aggTrade",
                 f"{sym_lower}@kline_15m",
                 f"{sym_lower}@kline_4h",
-                f"{sym_lower}@kline_1d"
+                f"{sym_lower}@kline_1d",
+                f"{sym_lower}@depth@100ms"
             ])
         
         # Динамические подписки для Bybit
@@ -263,14 +264,19 @@ class BinanceWSConnector:
 
     async def _handle_orderbook(self, data: dict):
         """Обработка снимка стакана."""
+        symbol = data.get("s", "BTCUSDT")
+        bids = data.get("b", data.get("bids", []))
+        asks = data.get("a", data.get("asks", []))
+        
         self.orderbook = {
+            "symbol": symbol,
             "bids": [
                 (float(price), float(qty))
-                for price, qty in data.get("bids", [])[:20]
+                for price, qty in bids[:20]
             ],
             "asks": [
                 (float(price), float(qty))
-                for price, qty in data.get("asks", [])[:20]
+                for price, qty in asks[:20]
             ],
             "time": data.get("T", time.time() * 1000),
         }
@@ -325,7 +331,8 @@ class BinanceWSConnector:
                 f"{sym_lower}@aggTrade",
                 f"{sym_lower}@kline_15m",
                 f"{sym_lower}@kline_4h",
-                f"{sym_lower}@kline_1d"
+                f"{sym_lower}@kline_1d",
+                f"{sym_lower}@depth@100ms"
             ])
         return {
             "connected": self.ws is not None and self.running,

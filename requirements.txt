@@ -25,10 +25,19 @@ hmmlearn==0.3.2
 
 # NLP (lightweight - no transformers/torch for Render free tier)
 vaderSentiment==3.3.2
+# Prod Infrastructure
+asyncpg>=0.29.0
+redis>=5.0.0
+xgboost>=2.0.3
+joblib>=1.3.2
 
 # AI Agent
 google-generativeai==0.8.3
-duckduckgo-search==6.2.12
+duckduckgo-search>=6.0.0
+vectorbt>=0.25.0
+ccxt>=4.0.0
+plotly>=5.0.0
+nbformat>=5.0.0
 
 # Exchange connectors
 websockets==12.0

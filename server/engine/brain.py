@@ -2,19 +2,15 @@
 APEX Deep Brain Module
 Handles the global context (World Model) and trade introspection (Self Model) using scikit-learn.
 """
+import os
 import json
-import base64
-import pickle
 import logging
 import numpy as np
+import joblib
 from typing import Dict, Any, Tuple
-from sqlalchemy import select
-from sklearn.linear_model import SGDClassifier
 from datetime import datetime, timezone
 import aiohttp
 
-from server.db.database import get_session_factory
-from server.db.models import BrainState
 from server.config import settings
 
 logger = logging.getLogger(__name__)
@@ -22,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ApexBrain:
     def __init__(self):
         # Models per symbol
-        self.models: Dict[str, SGDClassifier] = {}
+        self.models: Dict[str, Any] = {}
         # We need a fixed feature structure to ensure numpy arrays align correctly
         self.feature_names = [
             "signal_1", "signal_2", "signal_3", "signal_4",
@@ -32,60 +28,28 @@ class ApexBrain:
         # Macro data cache
         self.fear_greed_idx = 50.0  # Default neutral
         self.last_macro_update = 0
+        self.models_dir = os.path.join(os.path.dirname(__file__), "models")
 
     async def initialize(self):
-        """Loads serialized models from the database."""
-        logger.info("Initializing APEX Deep Brain...")
-        factory = get_session_factory()
-        async with factory() as session:
-            for symbol in settings.SUPPORTED_SYMBOLS:
-                stmt = select(BrainState).filter(BrainState.symbol == symbol)
-                res = await session.execute(stmt)
-                record = res.scalars().first()
-                if record and record.model_data:
-                    try:
-                        model_bytes = base64.b64decode(record.model_data)
-                        self.models[symbol] = pickle.loads(model_bytes)
-                        logger.info(f"Loaded Deep Brain model for {symbol}")
-                    except Exception as e:
-                        logger.error(f"Failed to load model for {symbol}: {e}")
-                        self._create_fresh_model(symbol)
-                else:
-                    self._create_fresh_model(symbol)
+        """Loads serialized XGBoost models from disk."""
+        logger.info("Initializing APEX Deep Brain with XGBoost...")
+        for symbol in settings.SUPPORTED_SYMBOLS:
+            model_path = os.path.join(self.models_dir, f"xgb_{symbol}.joblib")
+            if os.path.exists(model_path):
+                try:
+                    self.models[symbol] = joblib.load(model_path)
+                    logger.info(f"Loaded XGBoost model for {symbol} from {model_path}")
+                except Exception as e:
+                    logger.error(f"Failed to load XGBoost model for {symbol}: {e}")
+            else:
+                logger.info(f"No XGBoost model found for {symbol}. Will use default 0.5 probability.")
                     
         # Fetch initial macro data
         await self.update_macro_data()
 
-    def _create_fresh_model(self, symbol: str):
-        # SGDClassifier with log_loss provides predict_proba
-        model = SGDClassifier(loss='log_loss', max_iter=1000, random_state=42)
-        # We must initialize it with classes [0, 1] (0 = Loss, 1 = Win)
-        # We pass a dummy batch to initialize the weights
-        dummy_X = np.zeros((2, len(self.feature_names)))
-        dummy_y = np.array([0, 1])
-        model.partial_fit(dummy_X, dummy_y, classes=np.array([0, 1]))
-        self.models[symbol] = model
-        logger.info(f"Created fresh Deep Brain model for {symbol}")
-
     async def save_models(self):
-        """Serializes and saves current models to the DB."""
-        factory = get_session_factory()
-        async with factory() as session:
-            for symbol, model in self.models.items():
-                model_bytes = pickle.dumps(model)
-                model_b64 = base64.b64encode(model_bytes).decode('utf-8')
-                
-                stmt = select(BrainState).filter(BrainState.symbol == symbol)
-                res = await session.execute(stmt)
-                record = res.scalars().first()
-                
-                if record:
-                    record.model_data = model_b64
-                else:
-                    new_record = BrainState(symbol=symbol, model_data=model_b64)
-                    session.add(new_record)
-            await session.commit()
-            logger.info("Saved Deep Brain models to DB.")
+        """No-op for XGBoost (handled by batch_ml.py)"""
+        pass
 
     async def update_macro_data(self):
         """Fetches Fear & Greed index (World Model context)."""
@@ -172,20 +136,7 @@ class ApexBrain:
         return win_prob, reason
 
     async def train_on_trade(self, symbol: str, features: dict, pnl: float):
-        """Online learning step. If PnL > 0, label is 1 (Win), else 0 (Loss)."""
-        model = self.models.get(symbol)
-        if not model:
-            return
-            
-        X = self._dict_to_array(features)
-        # Binary classification: 1 for profit, 0 for loss
-        y = np.array([1 if pnl > 0 else 0])
-        
-        try:
-            # Learning rate is managed internally by SGDClassifier (invscaling/optimal)
-            model.partial_fit(X, y)
-            logger.info(f"Deep Brain [{symbol}]: Trained on trade (PnL: {pnl:.2f}, Label: {y[0]})")
-        except Exception as e:
-            logger.error(f"Failed to train brain for {symbol}: {e}")
+        """Offline batch learning is used now. This is a no-op."""
+        pass
 
 global_brain = ApexBrain()
