@@ -15,7 +15,6 @@ from server.config import settings
 from server.db.database import init_db, close_db
 from server.api.routes import router as api_router
 from server.api.ws import ws_endpoint
-from server.tasks.scheduler import start_background_tasks, stop_background_tasks
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -27,6 +26,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+try:
+    from server.tasks.scheduler import start_background_tasks, stop_background_tasks
+except ImportError as e:
+    logger.critical(
+        f"CRITICAL ERROR: Failed to import scheduler tasks. "
+        f"This likely means the 'apscheduler' library is not installed. "
+        f"Error: {e}. Background tasks will not run."
+    )
+    async def start_background_tasks(app):
+        logger.error("Attempted to start background tasks, but scheduler module was missing. No tasks will run.")
+    async def stop_background_tasks():
+        logger.error("Attempted to stop background tasks, but scheduler module was missing. No tasks to stop.")
 
 class SPAStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope) -> FileResponse:
