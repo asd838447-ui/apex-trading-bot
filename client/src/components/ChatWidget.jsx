@@ -54,6 +54,7 @@ export default function ChatWidget() {
         onClick={() => setIsOpen(true)}
         style={styles.floatingButton}
         className="glow-cyan"
+        aria-label="Open AI Chat"
       >
         <MessageSquare size={24} color="#fff" />
       </button>
