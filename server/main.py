@@ -31,13 +31,23 @@ logger = logging.getLogger(__name__)
 class SPAStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope) -> FileResponse:
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as ex:
             if ex.status_code == 404:
                 index_file = os.path.join(self.directory, "index.html")
                 if os.path.exists(index_file):
-                    return FileResponse(index_file)
-            raise ex
+                    response = FileResponse(index_file)
+                else:
+                    raise ex
+            else:
+                raise ex
+
+        if path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+            
+        return response
 
 
 @asynccontextmanager

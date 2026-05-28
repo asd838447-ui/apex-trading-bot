@@ -1,12 +1,22 @@
-import React from 'react';
-import EquityCurve from './EquityCurve';
+import React, { Suspense, lazy } from 'react';
 import SignalPanel from './SignalPanel';
 import SkillWeights from './SkillWeights';
 import RegimeIndicator from './RegimeIndicator';
-import RiskMonitor from './RiskMonitor';
-import TradeHistory from './TradeHistory';
-import QuantAlphas from './QuantAlphas';
-import ChatWidget from './ChatWidget';
+
+// Lazy loaded components for code splitting
+const EquityCurve = lazy(() => import('./EquityCurve'));
+const RiskMonitor = lazy(() => import('./RiskMonitor'));
+const TradeHistory = lazy(() => import('./TradeHistory'));
+const QuantAlphas = lazy(() => import('./QuantAlphas'));
+const ChatWidget = lazy(() => import('./ChatWidget'));
+
+function DashboardLoader() {
+  return (
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px' }}>
+      <span style={{ color: 'var(--text-muted)' }}>Loading module...</span>
+    </div>
+  );
+}
 
 export default function Dashboard({ 
   selectedSymbol, 
@@ -55,7 +65,9 @@ export default function Dashboard({
       <div className="dashboard-grid stagger">
         {/* Row 1: Equity (wide) + Signals (narrow) */}
         <div className="span-2 animate-slideUp">
-          <EquityCurve data={equityCurve} />
+          <Suspense fallback={<DashboardLoader />}>
+            <EquityCurve data={equityCurve} />
+          </Suspense>
         </div>
         <div className="animate-slideUp">
           <SignalPanel signals={currentSignals} />
@@ -69,19 +81,27 @@ export default function Dashboard({
           <RegimeIndicator regime={currentRegime} />
         </div>
         <div className="animate-slideUp">
-          <RiskMonitor risk={currentRisk} btcPrice={currentPrice} />
+          <Suspense fallback={<DashboardLoader />}>
+            <RiskMonitor risk={currentRisk} btcPrice={currentPrice} />
+          </Suspense>
         </div>
 
         {/* Row 3: Trade History (span-2) + QuantAlphas (span-1) */}
         <div className="span-2 animate-slideUp">
-          <TradeHistory trades={tradeHistory} />
+          <Suspense fallback={<DashboardLoader />}>
+            <TradeHistory trades={tradeHistory} />
+          </Suspense>
         </div>
         <div className="animate-slideUp">
-          <QuantAlphas metrics={currentQuantAlphas} symbol={selectedSymbol} />
+          <Suspense fallback={<DashboardLoader />}>
+            <QuantAlphas metrics={currentQuantAlphas} symbol={selectedSymbol} />
+          </Suspense>
         </div>
       </div>
 
-      <ChatWidget />
+      <Suspense fallback={null}>
+        <ChatWidget />
+      </Suspense>
     </main>
   );
 }
