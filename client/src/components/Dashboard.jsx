@@ -33,7 +33,7 @@ export default function Dashboard({
   ];
 
   return (
-    <div className="flex flex-col gap-lg">
+    <main className="flex flex-col gap-lg">
       {/* Premium Multi-Asset Tabs */}
       <div className="tabs-container animate-slideUp">
         {tabs.map((tab) => {
@@ -79,6 +79,6 @@ export default function Dashboard({
           <QuantAlphas metrics={currentQuantAlphas} symbol={selectedSymbol} />
         </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -36,7 +36,7 @@ export default function QuantAlphas({ metrics = {}, symbol = 'BTCUSDT' }) {
             <Brain size={16} color="var(--cyan)" className="pulse" />
           </div>
           <div>
-            <h3 style={styles.title}>QUANT ALPHAS</h3>
+            <div style={styles.title}>QUANT ALPHAS</div>
             <span style={styles.subtitle}>Microstructure & Ecosystem Metrics</span>
           </div>
         </div>
@@ -101,7 +101,7 @@ export default function QuantAlphas({ metrics = {}, symbol = 'BTCUSDT' }) {
         
         {symbol === 'HYPEUSDT' && (
           <div style={styles.specificContainer}>
-            <h4 style={styles.specificTitle}>HYPERLIQUID L1 ECOSYSTEM ALPHAS</h4>
+            <div style={styles.specificTitle}>HYPERLIQUID L1 ECOSYSTEM ALPHAS</div>
             
             <div style={styles.specificRow}>
               <div style={styles.specificItem}>
@@ -133,7 +133,7 @@ export default function QuantAlphas({ metrics = {}, symbol = 'BTCUSDT' }) {
 
         {symbol === 'TONUSDT' && (
           <div style={styles.specificContainer}>
-            <h4 style={styles.specificTitle}>THE OPEN NETWORK (TON) ALPHAS</h4>
+            <div style={styles.specificTitle}>THE OPEN NETWORK (TON) ALPHAS</div>
 
             <div style={styles.specificRow}>
               <div style={styles.specificItem}>
@@ -177,7 +177,7 @@ export default function QuantAlphas({ metrics = {}, symbol = 'BTCUSDT' }) {
 
         {symbol !== 'HYPEUSDT' && symbol !== 'TONUSDT' && (
           <div style={styles.specificContainer}>
-            <h4 style={styles.specificTitle}>MACRO & ORDER FLOW METRICS</h4>
+            <div style={styles.specificTitle}>MACRO & ORDER FLOW METRICS</div>
 
             <div style={styles.specificRow}>
               <div style={styles.specificItem}>
