@@ -437,14 +437,30 @@ async def evaluate_single_symbol(symbol: str):
                 return {1: 68.2, 2: 64.5, 3: 61.8, 4: 58.5, 5: 63.4, 6: 69.5, 7: 72.0}.get(skill_id, 50.0)
             return round(tracker["correct"] / total * 100, 1)
 
+        # Build raw weights array, then normalize to 100%
+        raw_weights = {
+            1: engine.get_weight(symbol, 1) * 100,
+            2: engine.get_weight(symbol, 2) * 100,
+            3: engine.get_weight(symbol, 3) * 100,
+            4: engine.get_weight(symbol, 4) * 100,
+            5: 12.0,
+            6: 8.0,
+            7: 6.0,
+        }
+        total_raw = sum(raw_weights.values())
+        if total_raw > 0:
+            norm_weights = {k: round(v / total_raw * 100, 1) for k, v in raw_weights.items()}
+        else:
+            norm_weights = {k: round(100.0 / 7, 1) for k in raw_weights}
+
         skills = [
-            {"id": 1, "name": "Order Flow", "category": "flow", "weight": engine.get_weight(symbol, 1)*100, "signal": cvd_sig, "confidence": 80 if cvd_sig != 0 else 0, "accuracy": get_real_accuracy(1)},
-            {"id": 2, "name": "Multi-TF", "category": "momentum", "weight": engine.get_weight(symbol, 2)*100, "signal": trend_sig, "confidence": 75 if trend_sig != 0 else 0, "accuracy": get_real_accuracy(2)},
-            {"id": 3, "name": "On-Chain", "category": "volume", "weight": engine.get_weight(symbol, 3)*100, "signal": oc_sig, "confidence": 70 if oc_sig != 0 else 0, "accuracy": get_real_accuracy(3)},
-            {"id": 4, "name": "NLP Sentiment", "category": "sentiment", "weight": engine.get_weight(symbol, 4)*100, "signal": sentiment_sig, "confidence": 65 if sentiment_sig != 0 else 0, "accuracy": get_real_accuracy(4)},
-            {"id": 5, "name": "Risk ATR", "category": "reversion", "weight": 12.0, "signal": reversion_sig, "confidence": 60 if reversion_sig != 0 else 0, "accuracy": get_real_accuracy(5)},
-            {"id": 6, "name": "Market Regime", "category": "regime", "weight": 8.0, "signal": regime_sig, "confidence": 70 if regime_sig != 0 else 0, "accuracy": get_real_accuracy(6)},
-            {"id": 7, "name": "No-Human", "category": "reversion", "weight": 6.0, "signal": -1 if market_state.tilt_guard.is_locked() else 0, "confidence": 95 if market_state.tilt_guard.is_locked() else 0, "accuracy": get_real_accuracy(7)}
+            {"id": 1, "name": "Order Flow", "category": "flow", "weight": norm_weights[1], "signal": cvd_sig, "confidence": 80 if cvd_sig != 0 else 0, "accuracy": get_real_accuracy(1)},
+            {"id": 2, "name": "Multi-TF", "category": "momentum", "weight": norm_weights[2], "signal": trend_sig, "confidence": 75 if trend_sig != 0 else 0, "accuracy": get_real_accuracy(2)},
+            {"id": 3, "name": "On-Chain", "category": "volume", "weight": norm_weights[3], "signal": oc_sig, "confidence": 70 if oc_sig != 0 else 0, "accuracy": get_real_accuracy(3)},
+            {"id": 4, "name": "NLP Sentiment", "category": "sentiment", "weight": norm_weights[4], "signal": sentiment_sig, "confidence": 65 if sentiment_sig != 0 else 0, "accuracy": get_real_accuracy(4)},
+            {"id": 5, "name": "Risk ATR", "category": "reversion", "weight": norm_weights[5], "signal": reversion_sig, "confidence": 60 if reversion_sig != 0 else 0, "accuracy": get_real_accuracy(5)},
+            {"id": 6, "name": "Market Regime", "category": "regime", "weight": norm_weights[6], "signal": regime_sig, "confidence": 70 if regime_sig != 0 else 0, "accuracy": get_real_accuracy(6)},
+            {"id": 7, "name": "No-Human", "category": "reversion", "weight": norm_weights[7], "signal": -1 if market_state.tilt_guard.is_locked() else 0, "confidence": 95 if market_state.tilt_guard.is_locked() else 0, "accuracy": get_real_accuracy(7)}
         ]
 
         market_state.multi_signals[symbol] = {

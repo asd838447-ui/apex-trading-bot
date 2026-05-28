@@ -21,7 +21,7 @@ from server.api.auth import (
 )
 from server.config import settings
 from server.tasks.state import market_state
-from server.skills.skill_03_onchain import get_quant_alphas, get_quant_alphas_real
+from server.skills.skill_03_onchain import get_quant_alphas
 
 import time
 from collections import defaultdict
@@ -100,7 +100,6 @@ async def login(request: LoginRequest, http_request: Request):
 
 # === Status ===
 
-from fastapi import Request
 
 @router.get("/status")
 async def get_status(request: Request):
@@ -120,7 +119,10 @@ async def get_status(request: Request):
         "confidence": 0
     }
     
-    quant_alphas_data = getattr(request.app.state, "quant_alphas_data", {})
+    quant_alphas_data = {
+        symbol: get_quant_alphas(symbol)
+        for symbol in settings.SUPPORTED_SYMBOLS
+    }
 
     return {
         "status": "running",
@@ -253,22 +255,31 @@ async def get_equity(
 @router.get("/skills")
 async def get_skills():
     """Веса и точность навыков."""
-    skills = [
-        {"id": 1, "name": "Order Flow", "weight": 22.0,
+    raw_skills = [
+        {"id": 1, "name": "Order Flow", "raw_weight": 22.0,
          "accuracy": 68.2, "category": "flow", "type": "signal"},
-        {"id": 2, "name": "Multi-TF", "weight": 20.0,
+        {"id": 2, "name": "Multi-TF", "raw_weight": 20.0,
          "accuracy": 64.5, "category": "momentum", "type": "signal"},
-        {"id": 3, "name": "On-Chain", "weight": 18.0,
+        {"id": 3, "name": "On-Chain", "raw_weight": 18.0,
          "accuracy": 61.8, "category": "volume", "type": "signal"},
-        {"id": 4, "name": "NLP Sentiment", "weight": 14.0,
+        {"id": 4, "name": "NLP Sentiment", "raw_weight": 14.0,
          "accuracy": 58.5, "category": "sentiment", "type": "signal"},
-        {"id": 5, "name": "Risk ATR", "weight": 12.0,
+        {"id": 5, "name": "Risk ATR", "raw_weight": 12.0,
          "accuracy": 63.4, "category": "reversion", "type": "filter"},
-        {"id": 6, "name": "Market Regime", "weight": 8.0,
+        {"id": 6, "name": "Market Regime", "raw_weight": 8.0,
          "accuracy": 69.5, "category": "regime", "type": "regime"},
-        {"id": 7, "name": "No-Human", "weight": 6.0,
+        {"id": 7, "name": "No-Human", "raw_weight": 6.0,
          "accuracy": 72.0, "category": "reversion", "type": "block"},
     ]
+    # Normalize weights to sum to 100%
+    total_raw = sum(s["raw_weight"] for s in raw_skills)
+    skills = []
+    for s in raw_skills:
+        normalized_weight = round(s["raw_weight"] / total_raw * 100, 1) if total_raw > 0 else 0.0
+        skills.append({
+            "id": s["id"], "name": s["name"], "weight": normalized_weight,
+            "accuracy": s["accuracy"], "category": s["category"], "type": s["type"]
+        })
     return {
         "skills": skills,
         "last_weight_update": (

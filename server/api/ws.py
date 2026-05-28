@@ -165,14 +165,18 @@ async def ws_endpoint(websocket: WebSocket):
                 },
             })
 
-        # Send quant_alphas for all supported symbols
-        from server.skills.skill_03_onchain import get_quant_alphas
+        # Send quant_alphas for all supported symbols (use REAL async fetcher)
+        from server.skills.skill_03_onchain import get_quant_alphas_real
         for symbol in settings.SUPPORTED_SYMBOLS:
+            try:
+                qa_metrics = await get_quant_alphas_real(symbol, exchange_client=market_state.exchange)
+            except Exception:
+                qa_metrics = {"obi": 0.0, "funding_divergence": 0.0}
             await manager.send_personal(websocket, {
                 "type": "quant_alphas_update",
                 "data": {
                     "symbol": symbol,
-                    "metrics": get_quant_alphas(symbol)
+                    "metrics": qa_metrics
                 },
             })
 
@@ -265,13 +269,17 @@ async def _send_periodic_updates(websocket: WebSocket):
 
             # 3.5 Обновление количественных метрик (каждые 10 секунд)
             if now_sec % 10 < 2:
-                from server.skills.skill_03_onchain import get_quant_alphas
+                from server.skills.skill_03_onchain import get_quant_alphas_real
                 for symbol in settings.SUPPORTED_SYMBOLS:
+                    try:
+                        qa_metrics = await get_quant_alphas_real(symbol, exchange_client=market_state.exchange)
+                    except Exception:
+                        qa_metrics = {"obi": 0.0, "funding_divergence": 0.0}
                     await manager.send_personal(websocket, {
                         "type": "quant_alphas_update",
                         "data": {
                             "symbol": symbol,
-                            "metrics": get_quant_alphas(symbol)
+                            "metrics": qa_metrics
                         },
                     })
 

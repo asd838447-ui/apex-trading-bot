@@ -349,7 +349,18 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           if (data.equity_curve) setEquityCurve(data.equity_curve);
-          if (data.trade_history) setTradeHistory(data.trade_history);
+          if (data.trade_history) {
+            // Deduplicate: keep only the latest entry per trade ID (CLOSED over OPEN)
+            const deduped = [];
+            const seen = new Set();
+            for (const trade of data.trade_history) {
+              if (!seen.has(trade.id)) {
+                seen.add(trade.id);
+                deduped.push(trade);
+              }
+            }
+            setTradeHistory(deduped);
+          }
           
           if (data.multi_signals) setMultiSignals(data.multi_signals);
           else if (data.signals) setMultiSignals((prev) => ({ ...prev, BTCUSDT: data.signals }));

@@ -721,7 +721,8 @@ class MarketState:
                         "reason": reason
                     }
 
-                    # Add to trade history
+                    # Add to trade history — remove any existing OPEN entry for this trade first
+                    self.trades = [t for t in self.trades if t.get("id") != closed_trade["id"]]
                     self.trades.insert(0, closed_trade)
                     if len(self.trades) > 30:
                         self.trades = self.trades[:30]

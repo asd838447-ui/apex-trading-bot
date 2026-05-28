@@ -96,41 +96,47 @@ def onchain_signal(index: float) -> int:
 async def get_quant_alphas_real(symbol: str, exchange_client=None) -> dict:
     """
     Compute REAL quantitative alphas from live Binance data.
-    Falls back to estimation if API calls fail.
-    (FIX BUG #6: was previously all random.uniform noise)
+    Uses public endpoints that don't require API keys.
+    Falls back to zeros only on complete network failure.
     """
     import time
     result = {
         "obi": 0.0,
         "funding_divergence": 0.0,
+        "funding_rate": 0.0,
         "last_update": time.time()
     }
     
-    if exchange_client is None:
-        return result
+    connector = aiohttp.TCPConnector(ssl=False)
+    proxy = settings.PROXY_URL if settings.PROXY_URL else None
     
-    try:
-        # Real OBI from orderbook
-        orderbook = await exchange_client.get_orderbook(symbol, limit=20)
-        bids = orderbook.get("bids", [])
-        asks = orderbook.get("asks", [])
+    async with aiohttp.ClientSession(connector=connector) as session:
+        # 1. OBI from orderbook (public endpoint, no API key needed)
+        try:
+            if exchange_client and hasattr(exchange_client, 'get_orderbook'):
+                orderbook = await exchange_client.get_orderbook(symbol, limit=20)
+            else:
+                url = f"https://fapi.binance.com/fapi/v1/depth?symbol={symbol}&limit=20"
+                async with session.get(url, timeout=5, proxy=proxy) as resp:
+                    if resp.status == 200:
+                        orderbook = await resp.json()
+                    else:
+                        orderbook = {}
+            
+            bids = orderbook.get("bids", [])
+            asks = orderbook.get("asks", [])
+            
+            if bids and asks:
+                bid_volume = sum(float(b[1]) for b in bids[:10])
+                ask_volume = sum(float(a[1]) for a in asks[:10])
+                total = bid_volume + ask_volume
+                if total > 0:
+                    result["obi"] = round((bid_volume - ask_volume) / total, 4)
+        except Exception as e:
+            logger.debug(f"OBI fetch failed for {symbol}: {e}")
         
-        if bids and asks:
-            bid_volume = sum(float(b[1]) for b in bids[:10])
-            ask_volume = sum(float(a[1]) for a in asks[:10])
-            total = bid_volume + ask_volume
-            if total > 0:
-                result["obi"] = round((bid_volume - ask_volume) / total, 4)
-    except Exception:
-        pass
-    
-    try:
-        # Real Funding Rate from Binance Futures
-        import aiohttp
-        from server.config import settings
-        connector = aiohttp.TCPConnector(ssl=False)
-        proxy = settings.PROXY_URL if settings.PROXY_URL else None
-        async with aiohttp.ClientSession(connector=connector) as session:
+        # 2. Funding Rate (public endpoint, no API key needed)
+        try:
             url = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={symbol}&limit=1"
             async with session.get(url, timeout=5, proxy=proxy) as resp:
                 if resp.status == 200:
@@ -139,9 +145,8 @@ async def get_quant_alphas_real(symbol: str, exchange_client=None) -> dict:
                         result["funding_rate"] = float(data[0].get("fundingRate", 0))
                         # Funding divergence = how far from 0.01% (baseline)
                         result["funding_divergence"] = round(result["funding_rate"] - 0.0001, 6)
-    except Exception:
-        result["funding_rate"] = 0.0
-        result["funding_divergence"] = 0.0
+        except Exception as e:
+            logger.debug(f"Funding rate fetch failed for {symbol}: {e}")
     
     # Symbol-specific extras
     if symbol == "HYPEUSDT":
