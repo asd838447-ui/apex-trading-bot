@@ -136,7 +136,7 @@ export default function RegimeIndicator({ regime }) {
                 {chartData.map((entry, idx) => (
                   <Cell
                     key={idx}
-                    fill={REGIME_COLORS_RAW[entry.regime] || '#64748b'}
+                    fill={REGIME_COLORS_RAW[entry.regime] || 'var(--text-muted)'}
                     fillOpacity={0.6}
                   />
                 ))}

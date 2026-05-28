@@ -119,10 +119,13 @@ async def get_status(request: Request):
         "confidence": 0
     }
     
-    quant_alphas_data = {
-        symbol: get_quant_alphas(symbol)
-        for symbol in settings.SUPPORTED_SYMBOLS
-    }
+    from server.skills.skill_03_onchain import get_quant_alphas_real
+    quant_alphas_data = {}
+    for symbol in settings.SUPPORTED_SYMBOLS:
+        try:
+            quant_alphas_data[symbol] = await get_quant_alphas_real(symbol, exchange_client=market_state.exchange)
+        except Exception:
+            quant_alphas_data[symbol] = {"obi": 0.0, "funding_divergence": 0.0}
 
     return {
         "status": "running",

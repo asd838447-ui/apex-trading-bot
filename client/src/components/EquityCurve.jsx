@@ -112,14 +112,14 @@ export default function EquityCurve({ data }) {
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
             <XAxis
               dataKey="date"
-              tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }}
+              tick={{ fill: 'var(--text-muted)', fontSize: 10, fontFamily: 'JetBrains Mono' }}
               axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
               tickLine={false}
               interval="preserveStartEnd"
               minTickGap={60}
             />
             <YAxis
-              tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }}
+              tick={{ fill: 'var(--text-muted)', fontSize: 10, fontFamily: 'JetBrains Mono' }}
               axisLine={false}
               tickLine={false}
               domain={['auto', 'auto']}
