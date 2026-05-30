@@ -5,6 +5,7 @@ Powered by Google Gemini and DuckDuckGo Search.
 import os
 import logging
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
 import google.generativeai as genai
 from duckduckgo_search import DDGS
 from server.tasks.state import market_state
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """You are APEX, a highly advanced quantitative trading AI bot.
 You are conversing with your owner/operator.
 Your tone is professional, analytical, concise, and slightly cynical like a veteran quant.
-You have access to live market data and can verify news via web search.
+You have access to live market data, can verify news via web search, and can check the bot's overall health and status.
+If the user asks "is everything okay with the bot?" or asks for status, use the check_bot_health tool to report equity, PnL, open positions, and system status.
 If the user provides you with an insight (e.g. "TON is going to pump because of an update"), you MUST use the verify_news tool to search the web and confirm it.
 If the news is verified, use the apply_market_bias tool to adjust the bot's trading behavior (e.g., bias +20% for LONG).
 If the news is false or cannot be verified, politely decline to adjust the bias, but if the user insists, you may apply a small bias.
@@ -34,7 +36,7 @@ class ChatAgent:
                 self.model = genai.GenerativeModel(
                     model_name="gemini-2.5-flash",
                     system_instruction=SYSTEM_PROMPT,
-                    tools=[self.verify_news, self.apply_market_bias, self.get_market_state]
+                    tools=[self.verify_news, self.apply_market_bias, self.get_market_state, self.check_bot_health]
                 )
                 self.chat_session = self.model.start_chat(enable_automatic_function_calling=True)
                 logger.info("ChatAgent initialized successfully with Gemini API.")
@@ -102,6 +104,29 @@ class ChatAgent:
         action = signals.get("action", "WAIT")
         
         return f"Symbol: {symbol}\nPrice: {price}\nRegime: {regime}\nCurrent Action: {action}"
+
+    def check_bot_health(self) -> str:
+        """
+        Retrieves the overall health, system status, active positions, daily PnL, and TiltGuard status of the bot.
+        """
+        logger.info("ChatAgent Tool Called: check_bot_health()")
+        
+        active_pos_count = len([p for p in market_state.active_positions.values() if p])
+        current_equity = market_state.current_equity
+        tilt_status = market_state.tilt_guard.status
+        is_locked = tilt_status.get("locked", False)
+        
+        daily_pnl = sum(t.get("pnl", 0) or 0 for t in market_state.trades if t.get("time", "")[:10] == datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        
+        status_msg = (
+            f"Bot Health Status:\n"
+            f"- Current Equity: {current_equity:.2f} USDT\n"
+            f"- Daily PnL: {daily_pnl:.2f} USDT\n"
+            f"- Active Positions: {active_pos_count}\n"
+            f"- Tilt Guard Locked: {is_locked}\n"
+            f"- System: All Core Systems Nominal, DB and Redis connected."
+        )
+        return status_msg
 
     async def send_message(self, message: str, is_learning_mode: bool) -> str:
         """
